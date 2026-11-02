@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from app.database.session import get_db
 from app.models.repository import Repository, Service
+from app.services.repo_service import RepositoryIndexerService
 from pydantic import BaseModel
 
 repositories_router = APIRouter(prefix="/repositories", tags=["Repositories"])
@@ -55,7 +56,11 @@ async def trigger_repository_index(repo_id: str, db: AsyncSession = Depends(get_
     repo = (await db.execute(stmt)).scalar_one_or_none()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-    
-    repo.index_status = "indexing"
-    await db.commit()
-    return {"status": "indexing_started", "repo_id": repo.id, "message": f"Indexation started for {repo.full_name}"}
+
+    result = await RepositoryIndexerService.index_repository(db, repository_id=repo_id)
+    return {
+        "status": "indexed",
+        "repo_id": repo.id,
+        "message": f"Successfully indexed {result['total_files']} files and stored {result['total_chunks']} AST code chunks in Qdrant.",
+        "details": result
+    }

@@ -151,6 +151,21 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  // RAG & Telemetry
+  searchRAG: (query: string, limit: number = 5) =>
+    fetchJson<any[]>("/api/rag/search", {
+      method: "POST",
+      body: JSON.stringify({ query, limit }),
+    }),
+
+  getRAGStats: () => fetchJson<{ collection_name: string; vector_dimension: number; total_points_indexed: number; status: string }>("/api/rag/stats"),
+
+  evaluateRAG: (testCases?: any[]) =>
+    fetchJson<any>("/api/rag/evaluate", {
+      method: "POST",
+      body: JSON.stringify({ test_cases: testCases }),
+    }),
+
   // Repositories
   getRepositories: () => fetchJson<any[]>("/api/repositories"),
   indexRepository: (repoId: string) =>

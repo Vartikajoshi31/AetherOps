@@ -10,6 +10,7 @@ from app.api.metrics import metrics_router
 from app.api.repositories import repositories_router
 from app.api.evaluations import evaluations_router
 from app.api.ws import ws_router
+from app.api.rag import rag_router
 from prometheus_client import make_asgi_app
 
 setup_logging()
@@ -52,6 +53,7 @@ app.include_router(incidents_router, prefix="/api")
 app.include_router(metrics_router, prefix="/api")
 app.include_router(repositories_router, prefix="/api")
 app.include_router(evaluations_router, prefix="/api")
+app.include_router(rag_router, prefix="/api")
 app.include_router(ws_router, prefix="/api")
 
 @app.get("/health", tags=["System"])
