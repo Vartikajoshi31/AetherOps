@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/venv/
+backend/env/
+.venv/
+*.db
+*.sqlite3
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+.npm
+npm-debug.log*
+
+# Environment & IDE
+.env
+.DS_Store
+.idea/
+.vscode/
+*.swp
+qdrant_data/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
