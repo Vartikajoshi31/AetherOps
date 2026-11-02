@@ -24,7 +24,11 @@ class QdrantStore:
         except Exception:
             logger.info(f"Remote Qdrant unavailable. Initializing embedded local Qdrant storage at {settings.QDRANT_STORAGE_PATH}")
             os.makedirs(settings.QDRANT_STORAGE_PATH, exist_ok=True)
-            return QdrantClient(path=settings.QDRANT_STORAGE_PATH)
+            try:
+                return QdrantClient(path=settings.QDRANT_STORAGE_PATH)
+            except Exception as lock_err:
+                logger.warning(f"Storage path {settings.QDRANT_STORAGE_PATH} is locked or busy ({lock_err}). Initializing in-memory Qdrant store.")
+                return QdrantClient(":memory:")
 
     def _ensure_collection(self):
         try:

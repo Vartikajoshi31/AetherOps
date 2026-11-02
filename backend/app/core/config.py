@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # LLM Settings
     OPENAI_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-4o"
+    OPENAI_MODEL: str = "gpt-4o"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     MAX_INVESTIGATION_STEPS: int = 15
     MAX_RETRY_LIMIT: int = 3

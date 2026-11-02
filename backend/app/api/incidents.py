@@ -25,6 +25,7 @@ from app.schemas.patch import (
 from app.schemas.agent import InvestigationReportResponse, InvestigationStartRequest
 from app.services.incident_service import IncidentService, utcnow
 from app.services.simulation_service import SimulationService
+from app.services.investigation_service import InvestigationService
 from app.api.ws import manager
 from pydantic import BaseModel
 import uuid
@@ -643,3 +644,29 @@ async def approve_incident_patch(
         github_pr_url=approval.github_pr_url,
         created_at=approval.created_at.isoformat() if approval.created_at else ""
     )
+
+class InvestigateRequest(BaseModel):
+    model_override: Optional[str] = None
+    max_steps: Optional[int] = 10
+
+@incidents_router.post("/{incident_id}/investigate")
+async def trigger_autonomous_investigation(
+    incident_id: str,
+    req: InvestigateRequest = InvestigateRequest(),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Triggers the central LangGraph multi-agent orchestration workflow:
+    Triage -> Logs/Traces/Code RAG -> Root Cause Synthesis -> Fix Generation -> Sandboxed Validation -> Review Gate.
+    """
+    try:
+        result = await InvestigationService.run_investigation(
+            db,
+            incident_id=incident_id,
+            model_override=req.model_override
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Autonomous investigation failed: {str(e)}")
