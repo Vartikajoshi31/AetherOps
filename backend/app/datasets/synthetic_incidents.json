@@ -1,0 +1,1602 @@
+[
+  {
+    "id": "15f16527-537c-4404-85de-940a4124ae0f",
+    "benchmark_id": "BENCH-001",
+    "title": "QueuePool Limit Overflow in Async DB Checkout Session",
+    "category": "database_pool_exhaustion",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Async database connections acquired from QueuePool are not released back to the pool in exception branches when downstream HTTP requests timeout.",
+    "ground_truth_culprit_files": [
+      "checkout-service/db.py"
+    ],
+    "ground_truth_culprit_function": "acquire",
+    "ground_truth_patch_diff": "--- a/checkout-service/db.py\n+++ b/checkout-service/db.py\n@@ -35,3 +35,5 @@\n+    finally:\n+        await pool.release(conn)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s",
+        "stack_trace": "File \"checkout-service/db.py\", line 42, in acquire\n    TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "db.acquire_connection",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "d4e3d1ea-b3de-4569-b018-7b4f90c168ab",
+    "benchmark_id": "BENCH-002",
+    "title": "Full Table Sequential Scan on Orders Table Without Index",
+    "category": "slow_query_missing_index",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Missing composite B-tree index on (customer_id, order_status) triggers sequential scans across 4M rows, increasing latency to 12s.",
+    "ground_truth_culprit_files": [
+      "order-service/repository.py"
+    ],
+    "ground_truth_culprit_function": "find_by_customer_and_status",
+    "ground_truth_patch_diff": "--- a/order-service/migrations/004_index.sql\n+++ b/order-service/migrations/004_index.sql\n+CREATE INDEX CONCURRENTLY idx_orders_cust_status ON orders(customer_id, status);\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'",
+        "stack_trace": "File \"order-service/repository.py\", line 42, in find_by_customer_and_status\n    SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "postgres.orders_scan",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "eab77416-9d16-4b0b-927c-60d860c4a9f8",
+    "benchmark_id": "BENCH-003",
+    "title": "Unbounded Cache Dict Growth in Inventory SKU Tracker",
+    "category": "memory_leak",
+    "severity": "Critical",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "In-memory dictionary cache stores all requested SKU items without max size eviction or TTL expiry, causing memory consumption to exceed 2GB container limit.",
+    "ground_truth_culprit_files": [
+      "inventory-service/cache.py"
+    ],
+    "ground_truth_culprit_function": "set",
+    "ground_truth_patch_diff": "--- a/inventory-service/cache.py\n+++ b/inventory-service/cache.py\n+    if len(self._store) >= self.maxsize: self.evict_oldest()\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)",
+        "stack_trace": "File \"inventory-service/cache.py\", line 42, in set\n    MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "cache.store_sku",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "2b019477-1d62-4264-96a6-9a6cf1591f97",
+    "benchmark_id": "BENCH-004",
+    "title": "Cross-Table Transaction Lock Order Inversion Deadlock",
+    "category": "deadlock",
+    "severity": "Critical",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Concurrent checkout transfers acquire row locks in arbitrary account ID order rather than sorted order, creating circular lock dependency graph.",
+    "ground_truth_culprit_files": [
+      "order-service/transaction.py"
+    ],
+    "ground_truth_culprit_function": "transfer_funds",
+    "ground_truth_patch_diff": "--- a/order-service/transaction.py\n+++ b/order-service/transaction.py\n+    first_acc, second_acc = sorted([acc_a, acc_b], key=lambda x: x.id)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892",
+        "stack_trace": "File \"order-service/transaction.py\", line 42, in transfer_funds\n    DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "sql.acquire_row_lock",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "a2864159-3c3f-4313-bfc2-4fd64323e81b",
+    "benchmark_id": "BENCH-005",
+    "title": "ReDoS Catastrophic Backtracking on Email Regex Validation",
+    "category": "cpu_saturation",
+    "severity": "High",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Regular expression ^([a-zA-Z0-9_\\.-]+)+@([a-zA-Z0-9_-]+)+$ exhibits polynomial/exponential backtracking when evaluated against malformed payloads.",
+    "ground_truth_culprit_files": [
+      "checkout-service/validator.py"
+    ],
+    "ground_truth_culprit_function": "validate_customer_email",
+    "ground_truth_patch_diff": "--- a/checkout-service/validator.py\n+++ b/checkout-service/validator.py\n-EMAIL_REGEX = r'^([a-zA-Z0-9_\\.-]+)+@([a-zA-Z0-9_-]+)+$'\n+EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+$'\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation",
+        "stack_trace": "File \"checkout-service/validator.py\", line 42, in validate_customer_email\n    CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "regex.email_match",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "4b5e522b-72c1-4ee6-9676-36f942cff805",
+    "benchmark_id": "BENCH-006",
+    "title": "Missing Socket Read Timeout in Shipping Carrier REST Client",
+    "category": "network_timeout",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "HTTP client initialized without read timeout (timeout=None); when external carrier gateway drops packets, connection hangs indefinitely until worker pool starves.",
+    "ground_truth_culprit_files": [
+      "order-service/shipping_client.py"
+    ],
+    "ground_truth_culprit_function": "fetch_shipping_rates",
+    "ground_truth_patch_diff": "--- a/order-service/shipping_client.py\n+++ b/order-service/shipping_client.py\n-    client = httpx.AsyncClient()\n+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=2.0, read=5.0))\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response",
+        "stack_trace": "File \"order-service/shipping_client.py\", line 42, in fetch_shipping_rates\n    ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "http.carrier_rates",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "aed3015b-b885-48f7-826a-16ca3a9484b3",
+    "benchmark_id": "BENCH-007",
+    "title": "Downstream Stock Service Degradation Cascading to Cart Service",
+    "category": "cascading_failure",
+    "severity": "Critical",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Absence of a circuit breaker between checkout and inventory allows inventory slow responses to saturate upstream connection pools across all services.",
+    "ground_truth_culprit_files": [
+      "inventory-service/client.py"
+    ],
+    "ground_truth_culprit_function": "query_availability",
+    "ground_truth_patch_diff": "--- a/inventory-service/client.py\n+++ b/inventory-service/client.py\n+    if circuit_breaker.is_open(): return get_cached_stock(sku)\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices",
+        "stack_trace": "File \"inventory-service/client.py\", line 42, in query_availability\n    UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "inventory.check_stock",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "24e2a0ef-8ce6-49f9-8921-515b34336f3b",
+    "benchmark_id": "BENCH-008",
+    "title": "Payment Provider API 503 Outage Without Fallback Processor",
+    "category": "upstream_outage",
+    "severity": "Critical",
+    "service_name": "payment-service",
+    "ground_truth_root_cause": "Payment gateway client does not implement secondary payment provider failover when primary provider returns persistent 503 Service Unavailable.",
+    "ground_truth_culprit_files": [
+      "payment-service/gateway.py"
+    ],
+    "ground_truth_culprit_function": "process_charge",
+    "ground_truth_patch_diff": "--- a/payment-service/gateway.py\n+++ b/payment-service/gateway.py\n+    except UpstreamProviderError:\n+        return await self.secondary_gateway.process_charge(req)\n",
+    "simulated_logs": [
+      {
+        "service_name": "payment-service",
+        "level": "ERROR",
+        "message": "HTTPStatusError: 503 Service Unavailable received from Stripe Gateway",
+        "stack_trace": "File \"payment-service/gateway.py\", line 42, in process_charge\n    HTTPStatusError: 503 Service Unavailable received from Stripe Gateway"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "payment-service",
+        "operation_name": "payment.primary_gateway",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "HTTPStatusError: 503 Service Unavailable received from Stripe Gateway"
+      }
+    ],
+    "test_verification_command": "pytest payment-service/tests/ -v"
+  },
+  {
+    "id": "d5a1d8cc-cf67-4598-9908-b18c793e53bf",
+    "benchmark_id": "BENCH-009",
+    "title": "Invalid Redis Cluster Max Memory Policy Eviction Setting",
+    "category": "configuration_error",
+    "severity": "Medium",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Configuration defaulted maxmemory-policy to 'noeviction', causing Redis to reject all write commands with OOM command errors when capacity was reached.",
+    "ground_truth_culprit_files": [
+      "inventory-service/config.py"
+    ],
+    "ground_truth_culprit_function": "load_redis_settings",
+    "ground_truth_patch_diff": "--- a/inventory-service/config.py\n+++ b/inventory-service/config.py\n-REDIS_MAXMEMORY_POLICY = 'noeviction'\n+REDIS_MAXMEMORY_POLICY = 'volatile-lru'\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "WARN",
+        "message": "ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster",
+        "stack_trace": "File \"inventory-service/config.py\", line 42, in load_redis_settings\n    ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "redis.write_key",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "4608d54a-4b85-4bfe-8328-278e4bc9e9ce",
+    "benchmark_id": "BENCH-010",
+    "title": "Missing Database Column in Release v2.4.1 Schema Mismatch",
+    "category": "bad_deployment",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "New application deployment expects 'discount_code_id' column in orders table, but Alembic database migration was not executed prior to container rollout.",
+    "ground_truth_culprit_files": [
+      "checkout-service/models.py"
+    ],
+    "ground_truth_culprit_function": "OrderModel",
+    "ground_truth_patch_diff": "--- a/checkout-service/models.py\n+++ b/checkout-service/models.py\n-    discount_code_id = Column(String(36), nullable=False)\n+    discount_code_id = Column(String(36), nullable=True)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "ProgrammingError: column orders.discount_code_id does not exist",
+        "stack_trace": "File \"checkout-service/models.py\", line 42, in OrderModel\n    ProgrammingError: column orders.discount_code_id does not exist"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "sql.insert_order",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "ProgrammingError: column orders.discount_code_id does not exist"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "62d1e5d9-d027-43b3-8fc4-b39087c86c9d",
+    "benchmark_id": "BENCH-011",
+    "title": "Synchronous Blocking IO in Async FastApi Event Loop",
+    "category": "thread_pool_exhaustion",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Synchronous file writing and PDF rendering executed directly inside async route handler, blocking the single event loop thread for all requests.",
+    "ground_truth_culprit_files": [
+      "order-service/pdf.py"
+    ],
+    "ground_truth_culprit_function": "generate_invoice_pdf",
+    "ground_truth_patch_diff": "--- a/order-service/pdf.py\n+++ b/order-service/pdf.py\n-    return render_pdf(invoice_data)\n+    return await asyncio.to_thread(render_pdf, invoice_data)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "EventLoopBlockedWarning: Async event loop was blocked for 2480ms by synchronous PDF generation",
+        "stack_trace": "File \"order-service/pdf.py\", line 42, in generate_invoice_pdf\n    EventLoopBlockedWarning: Async event loop was blocked for 2480ms by synchronous PDF generation"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "pdf.render_invoice",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "EventLoopBlockedWarning: Async event loop was blocked for 2480ms by synchronous PDF generation"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "2387bf4e-0850-40a3-bdec-0313150c37ae",
+    "benchmark_id": "BENCH-012",
+    "title": "Unhandled KeyError in Multi-Currency Exchange Rate Parser",
+    "category": "unhandled_exception",
+    "severity": "Medium",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Currency converter accesses rates[target_currency] directly; when an unsupported currency is passed in checkout, an unhandled KeyError crashes the handler.",
+    "ground_truth_culprit_files": [
+      "checkout-service/currency.py"
+    ],
+    "ground_truth_culprit_function": "convert_to_usd",
+    "ground_truth_patch_diff": "--- a/checkout-service/currency.py\n+++ b/checkout-service/currency.py\n-    return amount / rates[currency]\n+    rate = rates.get(currency) or 1.0\n+    return amount / rate\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "WARN",
+        "message": "KeyError: 'AED' currency code not present in exchange rates dictionary",
+        "stack_trace": "File \"checkout-service/currency.py\", line 42, in convert_to_usd\n    KeyError: 'AED' currency code not present in exchange rates dictionary"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "currency.convert",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "KeyError: 'AED' currency code not present in exchange rates dictionary"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "9bdd5861-71e4-413d-ab35-d8e4bd39bfd7",
+    "benchmark_id": "BENCH-013",
+    "title": "Non-Atomic Stock Decrement Leading to Negative Inventory",
+    "category": "concurrency_race",
+    "severity": "High",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Stock reservation reads current quantity, checks if > 0 in memory, and writes back decremented value, leading to race conditions under concurrent load.",
+    "ground_truth_culprit_files": [
+      "inventory-service/stock.py"
+    ],
+    "ground_truth_culprit_function": "reserve_item",
+    "ground_truth_patch_diff": "--- a/inventory-service/stock.py\n+++ b/inventory-service/stock.py\n-    stock.quantity -= qty\n+    # Atomic conditional update\n+    await db.execute(update(Stock).where(Stock.id == id, Stock.quantity >= qty).values(quantity=Stock.quantity - qty))\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "IntegrityError: Check constraint violation on inventory_stock.quantity >= 0",
+        "stack_trace": "File \"inventory-service/stock.py\", line 42, in reserve_item\n    IntegrityError: Check constraint violation on inventory_stock.quantity >= 0"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "stock.reserve_item",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "IntegrityError: Check constraint violation on inventory_stock.quantity >= 0"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "c192aec2-07a9-4a52-95bc-86e31c325e4b",
+    "benchmark_id": "BENCH-014",
+    "title": "Circuit Breaker Permanently Latched Open Due to High Reset Timeout",
+    "category": "circuit_breaker_tripped",
+    "severity": "High",
+    "service_name": "payment-service",
+    "ground_truth_root_cause": "Circuit breaker reset timeout configured to 3600 seconds (1 hour); after 5 transient failures, the breaker remains open rejecting all valid requests.",
+    "ground_truth_culprit_files": [
+      "payment-service/circuit.py"
+    ],
+    "ground_truth_culprit_function": "can_execute",
+    "ground_truth_patch_diff": "--- a/payment-service/circuit.py\n+++ b/payment-service/circuit.py\n-RESET_TIMEOUT = 3600\n+RESET_TIMEOUT = 30\n",
+    "simulated_logs": [
+      {
+        "service_name": "payment-service",
+        "level": "ERROR",
+        "message": "CircuitBreakerOpenException: Payment gateway circuit breaker is OPEN. Fast failing request.",
+        "stack_trace": "File \"payment-service/circuit.py\", line 42, in can_execute\n    CircuitBreakerOpenException: Payment gateway circuit breaker is OPEN. Fast failing request."
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "payment-service",
+        "operation_name": "circuit_breaker.evaluate",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "CircuitBreakerOpenException: Payment gateway circuit breaker is OPEN. Fast failing request."
+      }
+    ],
+    "test_verification_command": "pytest payment-service/tests/ -v"
+  },
+  {
+    "id": "f71df11b-f94b-40a7-a070-b6f6300d0962",
+    "benchmark_id": "BENCH-015",
+    "title": "UUID Object Serialization Failure in JSON Audit Logger",
+    "category": "serialization_error",
+    "severity": "Medium",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Standard json.dumps() does not support Python uuid.UUID objects without a custom encoder, causing audit logging to raise TypeError on every order.",
+    "ground_truth_culprit_files": [
+      "order-service/audit.py"
+    ],
+    "ground_truth_culprit_function": "log_order_event",
+    "ground_truth_patch_diff": "--- a/order-service/audit.py\n+++ b/order-service/audit.py\n-    return json.dumps(payload)\n+    return json.dumps(payload, default=str)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "WARN",
+        "message": "TypeError: Object of type UUID is not JSON serializable in json.dumps()",
+        "stack_trace": "File \"order-service/audit.py\", line 42, in log_order_event\n    TypeError: Object of type UUID is not JSON serializable in json.dumps()"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "audit.record_event",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "TypeError: Object of type UUID is not JSON serializable in json.dumps()"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "69a5aa83-1e86-43fc-9d87-3180fc6dae0c",
+    "benchmark_id": "BENCH-016",
+    "title": "Unrotated Application Access Logs Filling Root Volume",
+    "category": "disk_space_exhaustion",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Logging handler configured as standard FileHandler instead of RotatingFileHandler, causing stdout logs to accumulate 120GB and exhaust disk space.",
+    "ground_truth_culprit_files": [
+      "checkout-service/logging_conf.py"
+    ],
+    "ground_truth_culprit_function": "setup_file_handler",
+    "ground_truth_patch_diff": "--- a/checkout-service/logging_conf.py\n+++ b/checkout-service/logging_conf.py\n-    handler = logging.FileHandler('/var/log/checkout.log')\n+    handler = logging.handlers.RotatingFileHandler('/var/log/checkout.log', maxBytes=50*1024*1024, backupCount=5)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "OSError: [Errno 28] No space left on device: '/var/log/checkout.log'",
+        "stack_trace": "File \"checkout-service/logging_conf.py\", line 42, in setup_file_handler\n    OSError: [Errno 28] No space left on device: '/var/log/checkout.log'"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "logger.write_disk",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "OSError: [Errno 28] No space left on device: '/var/log/checkout.log'"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "d66b42a1-3def-4789-a2b8-784d6a97edd9",
+    "benchmark_id": "BENCH-017",
+    "title": "Cache Stampede on Top-Selling Product Page Expiry",
+    "category": "cache_stampede",
+    "severity": "High",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Popular cache key expires simultaneously for 5000 concurrent clients, causing all threads to query PostgreSQL database simultaneously.",
+    "ground_truth_culprit_files": [
+      "inventory-service/cache.py"
+    ],
+    "ground_truth_culprit_function": "get_product_details",
+    "ground_truth_patch_diff": "--- a/inventory-service/cache.py\n+++ b/inventory-service/cache.py\n+    # Implement probabilistic early expiration (XFetch algorithm)\n+    if should_early_refresh(key, ttl):\n+        asyncio.create_task(refresh_cache_background(key))\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "DBPoolOverloadWarning: 1200 concurrent queries for product_id=PROD-9988 upon cache expiration",
+        "stack_trace": "File \"inventory-service/cache.py\", line 42, in get_product_details\n    DBPoolOverloadWarning: 1200 concurrent queries for product_id=PROD-9988 upon cache expiration"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "db.select_product",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "DBPoolOverloadWarning: 1200 concurrent queries for product_id=PROD-9988 upon cache expiration"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "445007c8-9832-4761-a9d5-4f9cdd0a972d",
+    "benchmark_id": "BENCH-018",
+    "title": "Deterministic Exponential Backoff Without Random Jitter",
+    "category": "thundering_herd",
+    "severity": "Critical",
+    "service_name": "payment-service",
+    "ground_truth_root_cause": "Payment retries use deterministic 2^attempt backoff without jitter, causing waves of synchronized retry storms that hammer recovering servers.",
+    "ground_truth_culprit_files": [
+      "payment-service/client.py"
+    ],
+    "ground_truth_culprit_function": "calculate_retry_delay",
+    "ground_truth_patch_diff": "--- a/payment-service/client.py\n+++ b/payment-service/client.py\n-    return self.base_backoff * (2 ** attempt)\n+    import random\n+    return self.base_backoff * (2 ** attempt) + random.uniform(0.1, 0.5)\n",
+    "simulated_logs": [
+      {
+        "service_name": "payment-service",
+        "level": "ERROR",
+        "message": "GatewayTimeout: 504 Gateway Timeout recurring in exact 2.0s, 4.0s harmonic bursts",
+        "stack_trace": "File \"payment-service/client.py\", line 42, in calculate_retry_delay\n    GatewayTimeout: 504 Gateway Timeout recurring in exact 2.0s, 4.0s harmonic bursts"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "payment-service",
+        "operation_name": "payment.retry_delay",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "GatewayTimeout: 504 Gateway Timeout recurring in exact 2.0s, 4.0s harmonic bursts"
+      }
+    ],
+    "test_verification_command": "pytest payment-service/tests/ -v"
+  },
+  {
+    "id": "3c9eb7ae-6250-45f4-96ae-d33e55e9e731",
+    "benchmark_id": "BENCH-019",
+    "title": "Partial Write Deserialization Failure in Redis Session Store",
+    "category": "corrupted_cache_state",
+    "severity": "High",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Session state written without transaction or pipeline; network disconnection left truncated JSON in Redis key, throwing JSONDecodeError on read.",
+    "ground_truth_culprit_files": [
+      "checkout-service/session.py"
+    ],
+    "ground_truth_culprit_function": "get_cart_session",
+    "ground_truth_patch_diff": "--- a/checkout-service/session.py\n+++ b/checkout-service/session.py\n+    except json.JSONDecodeError:\n+        logger.warning('Corrupted session cache detected. Resetting session.')\n+        return CartSession()\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "json.decoder.JSONDecodeError: Unterminated string starting at line 1 column 124",
+        "stack_trace": "File \"checkout-service/session.py\", line 42, in get_cart_session\n    json.decoder.JSONDecodeError: Unterminated string starting at line 1 column 124"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "session.deserialize_cart",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "json.decoder.JSONDecodeError: Unterminated string starting at line 1 column 124"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "cf5d44bc-d6f1-4df0-a5cc-e24e229e94b8",
+    "benchmark_id": "BENCH-020",
+    "title": "Internal Kubernetes CoreDNS Service Discovery Flapping",
+    "category": "dns_resolution_failure",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Default resolver does not cache DNS records and queries CoreDNS on every outgoing HTTP request, failing when CoreDNS pods throttle UDP packets.",
+    "ground_truth_culprit_files": [
+      "order-service/dns.py"
+    ],
+    "ground_truth_culprit_function": "resolve_service_ip",
+    "ground_truth_patch_diff": "--- a/order-service/dns.py\n+++ b/order-service/dns.py\n+    # Enable connection keep-alive and local DNS caching\n+    transport = httpx.AsyncHTTPTransport(retries=2, keepalive_expiry=30.0)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "gaierror: [Errno -3] Temporary failure in name resolution for payment.ecommerce.svc.cluster.local",
+        "stack_trace": "File \"order-service/dns.py\", line 42, in resolve_service_ip\n    gaierror: [Errno -3] Temporary failure in name resolution for payment.ecommerce.svc.cluster.local"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "dns.resolve_host",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "gaierror: [Errno -3] Temporary failure in name resolution for payment.ecommerce.svc.cluster.local"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "9f623e90-62d5-408a-93ae-66e2851065b6",
+    "benchmark_id": "BENCH-021",
+    "title": "QueuePool Limit Overflow in Async DB Checkout Session (Cluster Partition 2)",
+    "category": "database_pool_exhaustion",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Async database connections acquired from QueuePool are not released back to the pool in exception branches when downstream HTTP requests timeout.",
+    "ground_truth_culprit_files": [
+      "checkout-service/db.py"
+    ],
+    "ground_truth_culprit_function": "acquire",
+    "ground_truth_patch_diff": "--- a/checkout-service/db.py\n+++ b/checkout-service/db.py\n@@ -35,3 +35,5 @@\n+    finally:\n+        await pool.release(conn)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s",
+        "stack_trace": "File \"checkout-service/db.py\", line 42, in acquire\n    TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "db.acquire_connection",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "f77b4e4f-f457-4ac8-b0c4-7fe2286c41c0",
+    "benchmark_id": "BENCH-022",
+    "title": "Full Table Sequential Scan on Orders Table Without Index (Cluster Partition 2)",
+    "category": "slow_query_missing_index",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Missing composite B-tree index on (customer_id, order_status) triggers sequential scans across 4M rows, increasing latency to 12s.",
+    "ground_truth_culprit_files": [
+      "order-service/repository.py"
+    ],
+    "ground_truth_culprit_function": "find_by_customer_and_status",
+    "ground_truth_patch_diff": "--- a/order-service/migrations/004_index.sql\n+++ b/order-service/migrations/004_index.sql\n+CREATE INDEX CONCURRENTLY idx_orders_cust_status ON orders(customer_id, status);\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'",
+        "stack_trace": "File \"order-service/repository.py\", line 42, in find_by_customer_and_status\n    SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "postgres.orders_scan",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "f8bcf549-42b4-4036-bcbe-0dd930ed0d6d",
+    "benchmark_id": "BENCH-023",
+    "title": "Unbounded Cache Dict Growth in Inventory SKU Tracker (Cluster Partition 2)",
+    "category": "memory_leak",
+    "severity": "Critical",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "In-memory dictionary cache stores all requested SKU items without max size eviction or TTL expiry, causing memory consumption to exceed 2GB container limit.",
+    "ground_truth_culprit_files": [
+      "inventory-service/cache.py"
+    ],
+    "ground_truth_culprit_function": "set",
+    "ground_truth_patch_diff": "--- a/inventory-service/cache.py\n+++ b/inventory-service/cache.py\n+    if len(self._store) >= self.maxsize: self.evict_oldest()\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)",
+        "stack_trace": "File \"inventory-service/cache.py\", line 42, in set\n    MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "cache.store_sku",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "aae5cdea-9a95-4f28-bc4c-f2668917d50b",
+    "benchmark_id": "BENCH-024",
+    "title": "Cross-Table Transaction Lock Order Inversion Deadlock (Cluster Partition 2)",
+    "category": "deadlock",
+    "severity": "Critical",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Concurrent checkout transfers acquire row locks in arbitrary account ID order rather than sorted order, creating circular lock dependency graph.",
+    "ground_truth_culprit_files": [
+      "order-service/transaction.py"
+    ],
+    "ground_truth_culprit_function": "transfer_funds",
+    "ground_truth_patch_diff": "--- a/order-service/transaction.py\n+++ b/order-service/transaction.py\n+    first_acc, second_acc = sorted([acc_a, acc_b], key=lambda x: x.id)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892",
+        "stack_trace": "File \"order-service/transaction.py\", line 42, in transfer_funds\n    DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "sql.acquire_row_lock",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "d3ac782a-de6d-4167-b3da-e2586a519ca9",
+    "benchmark_id": "BENCH-025",
+    "title": "ReDoS Catastrophic Backtracking on Email Regex Validation (Cluster Partition 2)",
+    "category": "cpu_saturation",
+    "severity": "High",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Regular expression ^([a-zA-Z0-9_\\.-]+)+@([a-zA-Z0-9_-]+)+$ exhibits polynomial/exponential backtracking when evaluated against malformed payloads.",
+    "ground_truth_culprit_files": [
+      "checkout-service/validator.py"
+    ],
+    "ground_truth_culprit_function": "validate_customer_email",
+    "ground_truth_patch_diff": "--- a/checkout-service/validator.py\n+++ b/checkout-service/validator.py\n-EMAIL_REGEX = r'^([a-zA-Z0-9_\\.-]+)+@([a-zA-Z0-9_-]+)+$'\n+EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+$'\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation",
+        "stack_trace": "File \"checkout-service/validator.py\", line 42, in validate_customer_email\n    CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "regex.email_match",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "e62d4326-e569-4162-9be8-11cd1ab90daa",
+    "benchmark_id": "BENCH-026",
+    "title": "Missing Socket Read Timeout in Shipping Carrier REST Client (Cluster Partition 2)",
+    "category": "network_timeout",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "HTTP client initialized without read timeout (timeout=None); when external carrier gateway drops packets, connection hangs indefinitely until worker pool starves.",
+    "ground_truth_culprit_files": [
+      "order-service/shipping_client.py"
+    ],
+    "ground_truth_culprit_function": "fetch_shipping_rates",
+    "ground_truth_patch_diff": "--- a/order-service/shipping_client.py\n+++ b/order-service/shipping_client.py\n-    client = httpx.AsyncClient()\n+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=2.0, read=5.0))\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response",
+        "stack_trace": "File \"order-service/shipping_client.py\", line 42, in fetch_shipping_rates\n    ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "http.carrier_rates",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "7f25e3c1-95dd-45fa-ac78-9ffe9ba1c90e",
+    "benchmark_id": "BENCH-027",
+    "title": "Downstream Stock Service Degradation Cascading to Cart Service (Cluster Partition 2)",
+    "category": "cascading_failure",
+    "severity": "Critical",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Absence of a circuit breaker between checkout and inventory allows inventory slow responses to saturate upstream connection pools across all services.",
+    "ground_truth_culprit_files": [
+      "inventory-service/client.py"
+    ],
+    "ground_truth_culprit_function": "query_availability",
+    "ground_truth_patch_diff": "--- a/inventory-service/client.py\n+++ b/inventory-service/client.py\n+    if circuit_breaker.is_open(): return get_cached_stock(sku)\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices",
+        "stack_trace": "File \"inventory-service/client.py\", line 42, in query_availability\n    UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "inventory.check_stock",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "a83cd4dd-07bc-4303-891b-3bf65b565c28",
+    "benchmark_id": "BENCH-028",
+    "title": "Payment Provider API 503 Outage Without Fallback Processor (Cluster Partition 2)",
+    "category": "upstream_outage",
+    "severity": "Critical",
+    "service_name": "payment-service",
+    "ground_truth_root_cause": "Payment gateway client does not implement secondary payment provider failover when primary provider returns persistent 503 Service Unavailable.",
+    "ground_truth_culprit_files": [
+      "payment-service/gateway.py"
+    ],
+    "ground_truth_culprit_function": "process_charge",
+    "ground_truth_patch_diff": "--- a/payment-service/gateway.py\n+++ b/payment-service/gateway.py\n+    except UpstreamProviderError:\n+        return await self.secondary_gateway.process_charge(req)\n",
+    "simulated_logs": [
+      {
+        "service_name": "payment-service",
+        "level": "ERROR",
+        "message": "HTTPStatusError: 503 Service Unavailable received from Stripe Gateway",
+        "stack_trace": "File \"payment-service/gateway.py\", line 42, in process_charge\n    HTTPStatusError: 503 Service Unavailable received from Stripe Gateway"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "payment-service",
+        "operation_name": "payment.primary_gateway",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "HTTPStatusError: 503 Service Unavailable received from Stripe Gateway"
+      }
+    ],
+    "test_verification_command": "pytest payment-service/tests/ -v"
+  },
+  {
+    "id": "c03a5dea-e17a-4857-8726-ee217bacd9f2",
+    "benchmark_id": "BENCH-029",
+    "title": "Invalid Redis Cluster Max Memory Policy Eviction Setting (Cluster Partition 2)",
+    "category": "configuration_error",
+    "severity": "Medium",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Configuration defaulted maxmemory-policy to 'noeviction', causing Redis to reject all write commands with OOM command errors when capacity was reached.",
+    "ground_truth_culprit_files": [
+      "inventory-service/config.py"
+    ],
+    "ground_truth_culprit_function": "load_redis_settings",
+    "ground_truth_patch_diff": "--- a/inventory-service/config.py\n+++ b/inventory-service/config.py\n-REDIS_MAXMEMORY_POLICY = 'noeviction'\n+REDIS_MAXMEMORY_POLICY = 'volatile-lru'\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "WARN",
+        "message": "ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster",
+        "stack_trace": "File \"inventory-service/config.py\", line 42, in load_redis_settings\n    ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "redis.write_key",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "50d1c037-08b3-4ab2-96a6-bfbbe047923d",
+    "benchmark_id": "BENCH-030",
+    "title": "Missing Database Column in Release v2.4.1 Schema Mismatch (Cluster Partition 2)",
+    "category": "bad_deployment",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "New application deployment expects 'discount_code_id' column in orders table, but Alembic database migration was not executed prior to container rollout.",
+    "ground_truth_culprit_files": [
+      "checkout-service/models.py"
+    ],
+    "ground_truth_culprit_function": "OrderModel",
+    "ground_truth_patch_diff": "--- a/checkout-service/models.py\n+++ b/checkout-service/models.py\n-    discount_code_id = Column(String(36), nullable=False)\n+    discount_code_id = Column(String(36), nullable=True)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "ProgrammingError: column orders.discount_code_id does not exist",
+        "stack_trace": "File \"checkout-service/models.py\", line 42, in OrderModel\n    ProgrammingError: column orders.discount_code_id does not exist"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "sql.insert_order",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "ProgrammingError: column orders.discount_code_id does not exist"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "f5a83003-4104-4fe5-a611-fae0e70edbbf",
+    "benchmark_id": "BENCH-031",
+    "title": "Synchronous Blocking IO in Async FastApi Event Loop (Cluster Partition 2)",
+    "category": "thread_pool_exhaustion",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Synchronous file writing and PDF rendering executed directly inside async route handler, blocking the single event loop thread for all requests.",
+    "ground_truth_culprit_files": [
+      "order-service/pdf.py"
+    ],
+    "ground_truth_culprit_function": "generate_invoice_pdf",
+    "ground_truth_patch_diff": "--- a/order-service/pdf.py\n+++ b/order-service/pdf.py\n-    return render_pdf(invoice_data)\n+    return await asyncio.to_thread(render_pdf, invoice_data)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "EventLoopBlockedWarning: Async event loop was blocked for 2480ms by synchronous PDF generation",
+        "stack_trace": "File \"order-service/pdf.py\", line 42, in generate_invoice_pdf\n    EventLoopBlockedWarning: Async event loop was blocked for 2480ms by synchronous PDF generation"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "pdf.render_invoice",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "EventLoopBlockedWarning: Async event loop was blocked for 2480ms by synchronous PDF generation"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "bc42546a-229b-473d-8929-1a548ea02e9b",
+    "benchmark_id": "BENCH-032",
+    "title": "Unhandled KeyError in Multi-Currency Exchange Rate Parser (Cluster Partition 2)",
+    "category": "unhandled_exception",
+    "severity": "Medium",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Currency converter accesses rates[target_currency] directly; when an unsupported currency is passed in checkout, an unhandled KeyError crashes the handler.",
+    "ground_truth_culprit_files": [
+      "checkout-service/currency.py"
+    ],
+    "ground_truth_culprit_function": "convert_to_usd",
+    "ground_truth_patch_diff": "--- a/checkout-service/currency.py\n+++ b/checkout-service/currency.py\n-    return amount / rates[currency]\n+    rate = rates.get(currency) or 1.0\n+    return amount / rate\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "WARN",
+        "message": "KeyError: 'AED' currency code not present in exchange rates dictionary",
+        "stack_trace": "File \"checkout-service/currency.py\", line 42, in convert_to_usd\n    KeyError: 'AED' currency code not present in exchange rates dictionary"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "currency.convert",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "KeyError: 'AED' currency code not present in exchange rates dictionary"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "0f1fb8b6-cefd-4c2b-95f9-2b8da5173fab",
+    "benchmark_id": "BENCH-033",
+    "title": "Non-Atomic Stock Decrement Leading to Negative Inventory (Cluster Partition 2)",
+    "category": "concurrency_race",
+    "severity": "High",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Stock reservation reads current quantity, checks if > 0 in memory, and writes back decremented value, leading to race conditions under concurrent load.",
+    "ground_truth_culprit_files": [
+      "inventory-service/stock.py"
+    ],
+    "ground_truth_culprit_function": "reserve_item",
+    "ground_truth_patch_diff": "--- a/inventory-service/stock.py\n+++ b/inventory-service/stock.py\n-    stock.quantity -= qty\n+    # Atomic conditional update\n+    await db.execute(update(Stock).where(Stock.id == id, Stock.quantity >= qty).values(quantity=Stock.quantity - qty))\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "IntegrityError: Check constraint violation on inventory_stock.quantity >= 0",
+        "stack_trace": "File \"inventory-service/stock.py\", line 42, in reserve_item\n    IntegrityError: Check constraint violation on inventory_stock.quantity >= 0"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "stock.reserve_item",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "IntegrityError: Check constraint violation on inventory_stock.quantity >= 0"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "02e9f9b5-df19-4733-a24f-340585dcd97d",
+    "benchmark_id": "BENCH-034",
+    "title": "Circuit Breaker Permanently Latched Open Due to High Reset Timeout (Cluster Partition 2)",
+    "category": "circuit_breaker_tripped",
+    "severity": "High",
+    "service_name": "payment-service",
+    "ground_truth_root_cause": "Circuit breaker reset timeout configured to 3600 seconds (1 hour); after 5 transient failures, the breaker remains open rejecting all valid requests.",
+    "ground_truth_culprit_files": [
+      "payment-service/circuit.py"
+    ],
+    "ground_truth_culprit_function": "can_execute",
+    "ground_truth_patch_diff": "--- a/payment-service/circuit.py\n+++ b/payment-service/circuit.py\n-RESET_TIMEOUT = 3600\n+RESET_TIMEOUT = 30\n",
+    "simulated_logs": [
+      {
+        "service_name": "payment-service",
+        "level": "ERROR",
+        "message": "CircuitBreakerOpenException: Payment gateway circuit breaker is OPEN. Fast failing request.",
+        "stack_trace": "File \"payment-service/circuit.py\", line 42, in can_execute\n    CircuitBreakerOpenException: Payment gateway circuit breaker is OPEN. Fast failing request."
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "payment-service",
+        "operation_name": "circuit_breaker.evaluate",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "CircuitBreakerOpenException: Payment gateway circuit breaker is OPEN. Fast failing request."
+      }
+    ],
+    "test_verification_command": "pytest payment-service/tests/ -v"
+  },
+  {
+    "id": "57f8bae0-d477-4b9f-ab4b-baa0e456f606",
+    "benchmark_id": "BENCH-035",
+    "title": "UUID Object Serialization Failure in JSON Audit Logger (Cluster Partition 2)",
+    "category": "serialization_error",
+    "severity": "Medium",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Standard json.dumps() does not support Python uuid.UUID objects without a custom encoder, causing audit logging to raise TypeError on every order.",
+    "ground_truth_culprit_files": [
+      "order-service/audit.py"
+    ],
+    "ground_truth_culprit_function": "log_order_event",
+    "ground_truth_patch_diff": "--- a/order-service/audit.py\n+++ b/order-service/audit.py\n-    return json.dumps(payload)\n+    return json.dumps(payload, default=str)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "WARN",
+        "message": "TypeError: Object of type UUID is not JSON serializable in json.dumps()",
+        "stack_trace": "File \"order-service/audit.py\", line 42, in log_order_event\n    TypeError: Object of type UUID is not JSON serializable in json.dumps()"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "audit.record_event",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "TypeError: Object of type UUID is not JSON serializable in json.dumps()"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "1cff8de5-1af2-4740-b7e4-4283af7d2f62",
+    "benchmark_id": "BENCH-036",
+    "title": "Unrotated Application Access Logs Filling Root Volume (Cluster Partition 2)",
+    "category": "disk_space_exhaustion",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Logging handler configured as standard FileHandler instead of RotatingFileHandler, causing stdout logs to accumulate 120GB and exhaust disk space.",
+    "ground_truth_culprit_files": [
+      "checkout-service/logging_conf.py"
+    ],
+    "ground_truth_culprit_function": "setup_file_handler",
+    "ground_truth_patch_diff": "--- a/checkout-service/logging_conf.py\n+++ b/checkout-service/logging_conf.py\n-    handler = logging.FileHandler('/var/log/checkout.log')\n+    handler = logging.handlers.RotatingFileHandler('/var/log/checkout.log', maxBytes=50*1024*1024, backupCount=5)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "OSError: [Errno 28] No space left on device: '/var/log/checkout.log'",
+        "stack_trace": "File \"checkout-service/logging_conf.py\", line 42, in setup_file_handler\n    OSError: [Errno 28] No space left on device: '/var/log/checkout.log'"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "logger.write_disk",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "OSError: [Errno 28] No space left on device: '/var/log/checkout.log'"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "009bf137-95de-4f8b-82e6-2e397fd35665",
+    "benchmark_id": "BENCH-037",
+    "title": "Cache Stampede on Top-Selling Product Page Expiry (Cluster Partition 2)",
+    "category": "cache_stampede",
+    "severity": "High",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Popular cache key expires simultaneously for 5000 concurrent clients, causing all threads to query PostgreSQL database simultaneously.",
+    "ground_truth_culprit_files": [
+      "inventory-service/cache.py"
+    ],
+    "ground_truth_culprit_function": "get_product_details",
+    "ground_truth_patch_diff": "--- a/inventory-service/cache.py\n+++ b/inventory-service/cache.py\n+    # Implement probabilistic early expiration (XFetch algorithm)\n+    if should_early_refresh(key, ttl):\n+        asyncio.create_task(refresh_cache_background(key))\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "DBPoolOverloadWarning: 1200 concurrent queries for product_id=PROD-9988 upon cache expiration",
+        "stack_trace": "File \"inventory-service/cache.py\", line 42, in get_product_details\n    DBPoolOverloadWarning: 1200 concurrent queries for product_id=PROD-9988 upon cache expiration"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "db.select_product",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "DBPoolOverloadWarning: 1200 concurrent queries for product_id=PROD-9988 upon cache expiration"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "a17b5a02-ace2-40ac-bdec-8586a2870a8d",
+    "benchmark_id": "BENCH-038",
+    "title": "Deterministic Exponential Backoff Without Random Jitter (Cluster Partition 2)",
+    "category": "thundering_herd",
+    "severity": "Critical",
+    "service_name": "payment-service",
+    "ground_truth_root_cause": "Payment retries use deterministic 2^attempt backoff without jitter, causing waves of synchronized retry storms that hammer recovering servers.",
+    "ground_truth_culprit_files": [
+      "payment-service/client.py"
+    ],
+    "ground_truth_culprit_function": "calculate_retry_delay",
+    "ground_truth_patch_diff": "--- a/payment-service/client.py\n+++ b/payment-service/client.py\n-    return self.base_backoff * (2 ** attempt)\n+    import random\n+    return self.base_backoff * (2 ** attempt) + random.uniform(0.1, 0.5)\n",
+    "simulated_logs": [
+      {
+        "service_name": "payment-service",
+        "level": "ERROR",
+        "message": "GatewayTimeout: 504 Gateway Timeout recurring in exact 2.0s, 4.0s harmonic bursts",
+        "stack_trace": "File \"payment-service/client.py\", line 42, in calculate_retry_delay\n    GatewayTimeout: 504 Gateway Timeout recurring in exact 2.0s, 4.0s harmonic bursts"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "payment-service",
+        "operation_name": "payment.retry_delay",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "GatewayTimeout: 504 Gateway Timeout recurring in exact 2.0s, 4.0s harmonic bursts"
+      }
+    ],
+    "test_verification_command": "pytest payment-service/tests/ -v"
+  },
+  {
+    "id": "d92c3364-db7e-433b-a1bb-5c3677307ff2",
+    "benchmark_id": "BENCH-039",
+    "title": "Partial Write Deserialization Failure in Redis Session Store (Cluster Partition 2)",
+    "category": "corrupted_cache_state",
+    "severity": "High",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Session state written without transaction or pipeline; network disconnection left truncated JSON in Redis key, throwing JSONDecodeError on read.",
+    "ground_truth_culprit_files": [
+      "checkout-service/session.py"
+    ],
+    "ground_truth_culprit_function": "get_cart_session",
+    "ground_truth_patch_diff": "--- a/checkout-service/session.py\n+++ b/checkout-service/session.py\n+    except json.JSONDecodeError:\n+        logger.warning('Corrupted session cache detected. Resetting session.')\n+        return CartSession()\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "json.decoder.JSONDecodeError: Unterminated string starting at line 1 column 124",
+        "stack_trace": "File \"checkout-service/session.py\", line 42, in get_cart_session\n    json.decoder.JSONDecodeError: Unterminated string starting at line 1 column 124"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "session.deserialize_cart",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "json.decoder.JSONDecodeError: Unterminated string starting at line 1 column 124"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "96a6f3fd-5035-4c64-a9a2-b29e40ee84d6",
+    "benchmark_id": "BENCH-040",
+    "title": "Internal Kubernetes CoreDNS Service Discovery Flapping (Cluster Partition 2)",
+    "category": "dns_resolution_failure",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Default resolver does not cache DNS records and queries CoreDNS on every outgoing HTTP request, failing when CoreDNS pods throttle UDP packets.",
+    "ground_truth_culprit_files": [
+      "order-service/dns.py"
+    ],
+    "ground_truth_culprit_function": "resolve_service_ip",
+    "ground_truth_patch_diff": "--- a/order-service/dns.py\n+++ b/order-service/dns.py\n+    # Enable connection keep-alive and local DNS caching\n+    transport = httpx.AsyncHTTPTransport(retries=2, keepalive_expiry=30.0)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "gaierror: [Errno -3] Temporary failure in name resolution for payment.ecommerce.svc.cluster.local",
+        "stack_trace": "File \"order-service/dns.py\", line 42, in resolve_service_ip\n    gaierror: [Errno -3] Temporary failure in name resolution for payment.ecommerce.svc.cluster.local"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "dns.resolve_host",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "gaierror: [Errno -3] Temporary failure in name resolution for payment.ecommerce.svc.cluster.local"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "68caaae3-6b69-4507-86f9-36ace5e43422",
+    "benchmark_id": "BENCH-041",
+    "title": "QueuePool Limit Overflow in Async DB Checkout Session (Cluster Partition 3)",
+    "category": "database_pool_exhaustion",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Async database connections acquired from QueuePool are not released back to the pool in exception branches when downstream HTTP requests timeout.",
+    "ground_truth_culprit_files": [
+      "checkout-service/db.py"
+    ],
+    "ground_truth_culprit_function": "acquire",
+    "ground_truth_patch_diff": "--- a/checkout-service/db.py\n+++ b/checkout-service/db.py\n@@ -35,3 +35,5 @@\n+    finally:\n+        await pool.release(conn)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s",
+        "stack_trace": "File \"checkout-service/db.py\", line 42, in acquire\n    TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "db.acquire_connection",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 5.0s"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "8d1ee854-3260-4ed8-8a0b-2a095c06ded1",
+    "benchmark_id": "BENCH-042",
+    "title": "Full Table Sequential Scan on Orders Table Without Index (Cluster Partition 3)",
+    "category": "slow_query_missing_index",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Missing composite B-tree index on (customer_id, order_status) triggers sequential scans across 4M rows, increasing latency to 12s.",
+    "ground_truth_culprit_files": [
+      "order-service/repository.py"
+    ],
+    "ground_truth_culprit_function": "find_by_customer_and_status",
+    "ground_truth_patch_diff": "--- a/order-service/migrations/004_index.sql\n+++ b/order-service/migrations/004_index.sql\n+CREATE INDEX CONCURRENTLY idx_orders_cust_status ON orders(customer_id, status);\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'",
+        "stack_trace": "File \"order-service/repository.py\", line 42, in find_by_customer_and_status\n    SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "postgres.orders_scan",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "SlowQueryWarning: Query executed in 11840ms: SELECT * FROM orders WHERE customer_id = $1 AND status = 'PENDING'"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "22c480e6-ef3e-428a-ac7e-2e0476b74fb7",
+    "benchmark_id": "BENCH-043",
+    "title": "Unbounded Cache Dict Growth in Inventory SKU Tracker (Cluster Partition 3)",
+    "category": "memory_leak",
+    "severity": "Critical",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "In-memory dictionary cache stores all requested SKU items without max size eviction or TTL expiry, causing memory consumption to exceed 2GB container limit.",
+    "ground_truth_culprit_files": [
+      "inventory-service/cache.py"
+    ],
+    "ground_truth_culprit_function": "set",
+    "ground_truth_patch_diff": "--- a/inventory-service/cache.py\n+++ b/inventory-service/cache.py\n+    if len(self._store) >= self.maxsize: self.evict_oldest()\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)",
+        "stack_trace": "File \"inventory-service/cache.py\", line 42, in set\n    MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "cache.store_sku",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "MemoryError: Container memory cgroup limit reached (1024MB), process received SIGKILL (OOMKilled)"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "32c584d1-f5f8-402e-9417-fcd62908be37",
+    "benchmark_id": "BENCH-044",
+    "title": "Cross-Table Transaction Lock Order Inversion Deadlock (Cluster Partition 3)",
+    "category": "deadlock",
+    "severity": "Critical",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "Concurrent checkout transfers acquire row locks in arbitrary account ID order rather than sorted order, creating circular lock dependency graph.",
+    "ground_truth_culprit_files": [
+      "order-service/transaction.py"
+    ],
+    "ground_truth_culprit_function": "transfer_funds",
+    "ground_truth_patch_diff": "--- a/order-service/transaction.py\n+++ b/order-service/transaction.py\n+    first_acc, second_acc = sorted([acc_a, acc_b], key=lambda x: x.id)\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892",
+        "stack_trace": "File \"order-service/transaction.py\", line 42, in transfer_funds\n    DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "sql.acquire_row_lock",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "DeadlockDetected: Process 4104 waits for ExclusiveLock on transaction 891; process 4105 waits for ShareLock on transaction 892"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "0f4080b6-9fae-4bfc-8e3d-76b0d865c0e7",
+    "benchmark_id": "BENCH-045",
+    "title": "ReDoS Catastrophic Backtracking on Email Regex Validation (Cluster Partition 3)",
+    "category": "cpu_saturation",
+    "severity": "High",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "Regular expression ^([a-zA-Z0-9_\\.-]+)+@([a-zA-Z0-9_-]+)+$ exhibits polynomial/exponential backtracking when evaluated against malformed payloads.",
+    "ground_truth_culprit_files": [
+      "checkout-service/validator.py"
+    ],
+    "ground_truth_culprit_function": "validate_customer_email",
+    "ground_truth_patch_diff": "--- a/checkout-service/validator.py\n+++ b/checkout-service/validator.py\n-EMAIL_REGEX = r'^([a-zA-Z0-9_\\.-]+)+@([a-zA-Z0-9_-]+)+$'\n+EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+$'\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation",
+        "stack_trace": "File \"checkout-service/validator.py\", line 42, in validate_customer_email\n    CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "regex.email_match",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "CPUSaturationWarning: Worker thread pinned at 100% CPU for >15000ms in regex evaluation"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  },
+  {
+    "id": "8ca0eaf3-a4fd-4e69-9e45-518ccb8bd2c4",
+    "benchmark_id": "BENCH-046",
+    "title": "Missing Socket Read Timeout in Shipping Carrier REST Client (Cluster Partition 3)",
+    "category": "network_timeout",
+    "severity": "High",
+    "service_name": "order-service",
+    "ground_truth_root_cause": "HTTP client initialized without read timeout (timeout=None); when external carrier gateway drops packets, connection hangs indefinitely until worker pool starves.",
+    "ground_truth_culprit_files": [
+      "order-service/shipping_client.py"
+    ],
+    "ground_truth_culprit_function": "fetch_shipping_rates",
+    "ground_truth_patch_diff": "--- a/order-service/shipping_client.py\n+++ b/order-service/shipping_client.py\n-    client = httpx.AsyncClient()\n+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=2.0, read=5.0))\n",
+    "simulated_logs": [
+      {
+        "service_name": "order-service",
+        "level": "ERROR",
+        "message": "ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response",
+        "stack_trace": "File \"order-service/shipping_client.py\", line 42, in fetch_shipping_rates\n    ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "order-service",
+        "operation_name": "http.carrier_rates",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "ConnectionPoolTimeout: All 50 worker threads blocked waiting for carrier socket response"
+      }
+    ],
+    "test_verification_command": "pytest order-service/tests/ -v"
+  },
+  {
+    "id": "b8e890b3-8524-4157-acff-70d511564a30",
+    "benchmark_id": "BENCH-047",
+    "title": "Downstream Stock Service Degradation Cascading to Cart Service (Cluster Partition 3)",
+    "category": "cascading_failure",
+    "severity": "Critical",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Absence of a circuit breaker between checkout and inventory allows inventory slow responses to saturate upstream connection pools across all services.",
+    "ground_truth_culprit_files": [
+      "inventory-service/client.py"
+    ],
+    "ground_truth_culprit_function": "query_availability",
+    "ground_truth_patch_diff": "--- a/inventory-service/client.py\n+++ b/inventory-service/client.py\n+    if circuit_breaker.is_open(): return get_cached_stock(sku)\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "ERROR",
+        "message": "UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices",
+        "stack_trace": "File \"inventory-service/client.py\", line 42, in query_availability\n    UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "inventory.check_stock",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "UpstreamCircuitOpenError: Cascade failure propagated across 4 microservices"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "7a9bead2-917d-4ab7-870b-31e5223065b5",
+    "benchmark_id": "BENCH-048",
+    "title": "Payment Provider API 503 Outage Without Fallback Processor (Cluster Partition 3)",
+    "category": "upstream_outage",
+    "severity": "Critical",
+    "service_name": "payment-service",
+    "ground_truth_root_cause": "Payment gateway client does not implement secondary payment provider failover when primary provider returns persistent 503 Service Unavailable.",
+    "ground_truth_culprit_files": [
+      "payment-service/gateway.py"
+    ],
+    "ground_truth_culprit_function": "process_charge",
+    "ground_truth_patch_diff": "--- a/payment-service/gateway.py\n+++ b/payment-service/gateway.py\n+    except UpstreamProviderError:\n+        return await self.secondary_gateway.process_charge(req)\n",
+    "simulated_logs": [
+      {
+        "service_name": "payment-service",
+        "level": "ERROR",
+        "message": "HTTPStatusError: 503 Service Unavailable received from Stripe Gateway",
+        "stack_trace": "File \"payment-service/gateway.py\", line 42, in process_charge\n    HTTPStatusError: 503 Service Unavailable received from Stripe Gateway"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "payment-service",
+        "operation_name": "payment.primary_gateway",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "HTTPStatusError: 503 Service Unavailable received from Stripe Gateway"
+      }
+    ],
+    "test_verification_command": "pytest payment-service/tests/ -v"
+  },
+  {
+    "id": "7e31d571-04f0-4b76-9528-7de7ea78107b",
+    "benchmark_id": "BENCH-049",
+    "title": "Invalid Redis Cluster Max Memory Policy Eviction Setting (Cluster Partition 3)",
+    "category": "configuration_error",
+    "severity": "Medium",
+    "service_name": "inventory-service",
+    "ground_truth_root_cause": "Configuration defaulted maxmemory-policy to 'noeviction', causing Redis to reject all write commands with OOM command errors when capacity was reached.",
+    "ground_truth_culprit_files": [
+      "inventory-service/config.py"
+    ],
+    "ground_truth_culprit_function": "load_redis_settings",
+    "ground_truth_patch_diff": "--- a/inventory-service/config.py\n+++ b/inventory-service/config.py\n-REDIS_MAXMEMORY_POLICY = 'noeviction'\n+REDIS_MAXMEMORY_POLICY = 'volatile-lru'\n",
+    "simulated_logs": [
+      {
+        "service_name": "inventory-service",
+        "level": "WARN",
+        "message": "ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster",
+        "stack_trace": "File \"inventory-service/config.py\", line 42, in load_redis_settings\n    ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "inventory-service",
+        "operation_name": "redis.write_key",
+        "duration_ms": 450.0,
+        "status_code": "400",
+        "error_message": "ResponseError: OOM command not allowed when used memory > 'maxmemory' in Redis cluster"
+      }
+    ],
+    "test_verification_command": "pytest inventory-service/tests/ -v"
+  },
+  {
+    "id": "7e05bc8c-347d-4977-ae75-981ebf5d2601",
+    "benchmark_id": "BENCH-050",
+    "title": "Missing Database Column in Release v2.4.1 Schema Mismatch (Cluster Partition 3)",
+    "category": "bad_deployment",
+    "severity": "Critical",
+    "service_name": "checkout-service",
+    "ground_truth_root_cause": "New application deployment expects 'discount_code_id' column in orders table, but Alembic database migration was not executed prior to container rollout.",
+    "ground_truth_culprit_files": [
+      "checkout-service/models.py"
+    ],
+    "ground_truth_culprit_function": "OrderModel",
+    "ground_truth_patch_diff": "--- a/checkout-service/models.py\n+++ b/checkout-service/models.py\n-    discount_code_id = Column(String(36), nullable=False)\n+    discount_code_id = Column(String(36), nullable=True)\n",
+    "simulated_logs": [
+      {
+        "service_name": "checkout-service",
+        "level": "ERROR",
+        "message": "ProgrammingError: column orders.discount_code_id does not exist",
+        "stack_trace": "File \"checkout-service/models.py\", line 42, in OrderModel\n    ProgrammingError: column orders.discount_code_id does not exist"
+      }
+    ],
+    "simulated_traces": [
+      {
+        "service_name": "checkout-service",
+        "operation_name": "sql.insert_order",
+        "duration_ms": 3200.0,
+        "status_code": "500",
+        "error_message": "ProgrammingError: column orders.discount_code_id does not exist"
+      }
+    ],
+    "test_verification_command": "pytest checkout-service/tests/ -v"
+  }
+]
