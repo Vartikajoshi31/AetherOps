@@ -5,11 +5,13 @@ from sqlalchemy import select, desc
 from app.database.session import get_db
 from app.models.repository import Repository, Service
 from app.services.repo_service import RepositoryIndexerService
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 repositories_router = APIRouter(prefix="/repositories", tags=["Repositories"])
 
 class RepositoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     full_name: str
@@ -20,9 +22,6 @@ class RepositoryResponse(BaseModel):
     index_status: str
     total_files: int
     created_at: str
-
-    class Config:
-        from_attributes = True
 
 class RepositoryCreate(BaseModel):
     name: str

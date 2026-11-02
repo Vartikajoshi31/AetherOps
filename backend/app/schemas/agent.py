@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class InvestigationStartRequest(BaseModel):
     model_override: Optional[str] = None
@@ -8,6 +8,8 @@ class InvestigationStartRequest(BaseModel):
     auto_validate_patch: bool = True
 
 class AgentEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     run_id: str
     agent_name: str
@@ -21,10 +23,9 @@ class AgentEventResponse(BaseModel):
     tokens_used: int
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 class RootCauseHypothesisResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     run_id: str
     incident_id: str
@@ -37,10 +38,9 @@ class RootCauseHypothesisResponse(BaseModel):
     counter_evidence: List[Dict[str, Any]] = []
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 class InvestigationReportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     incident_id: str
     run_id: Optional[str] = None
@@ -61,10 +61,9 @@ class InvestigationReportResponse(BaseModel):
     status: str
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 class AgentRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     incident_id: str
     workflow_name: str
@@ -79,6 +78,3 @@ class AgentRunResponse(BaseModel):
     events: List[AgentEventResponse] = []
     hypotheses: List[RootCauseHypothesisResponse] = []
     report: Optional[InvestigationReportResponse] = None
-
-    class Config:
-        from_attributes = True

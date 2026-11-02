@@ -17,7 +17,7 @@ class QdrantStore:
 
     def _init_client(self) -> QdrantClient:
         try:
-            client = QdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT, timeout=2.0)
+            client = QdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT, timeout=2.0, check_compatibility=False)
             client.get_collections()
             logger.info(f"Connected to remote Qdrant vector database at {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
             return client

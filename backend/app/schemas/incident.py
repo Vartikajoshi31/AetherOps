@@ -1,14 +1,14 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class IncidentBase(BaseModel):
-    title: str = Field(..., example="Checkout Service Connection Pool Exhaustion")
-    description: str = Field(..., example="HTTP 500 error spike in checkout-service during payment processing")
-    severity: str = Field("High", example="High")  # Critical, High, Medium, Low
-    affected_services: List[str] = Field(default_factory=list, example=["checkout-service", "order-service"])
-    error_rate: str = Field("0.00%", example="34.8%")
-    detection_source: str = Field("Datadog Alert", example="Prometheus / AlertManager")
+    title: str = Field(..., json_schema_extra={"example": "Checkout Service Connection Pool Exhaustion"})
+    description: str = Field(..., json_schema_extra={"example": "HTTP 500 error spike in checkout-service during payment processing"})
+    severity: str = Field("High", json_schema_extra={"example": "High"})  # Critical, High, Medium, Low
+    affected_services: List[str] = Field(default_factory=list, json_schema_extra={"example": ["checkout-service", "order-service"]})
+    error_rate: str = Field("0.00%", json_schema_extra={"example": "34.8%"})
+    detection_source: str = Field("Datadog Alert", json_schema_extra={"example": "Prometheus / AlertManager"})
     tags: List[str] = Field(default_factory=list)
 
 class IncidentCreate(IncidentBase):
@@ -26,6 +26,8 @@ class IncidentUpdate(BaseModel):
     tags: Optional[List[str]] = None
 
 class IncidentEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     incident_id: str
     event_type: str
@@ -34,10 +36,9 @@ class IncidentEventResponse(BaseModel):
     event_metadata: Dict[str, Any] = {}
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 class IncidentLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     incident_id: str
     service_name: str
@@ -47,10 +48,9 @@ class IncidentLogResponse(BaseModel):
     stack_trace: Optional[str] = None
     log_attributes: Dict[str, Any] = {}
 
-    class Config:
-        from_attributes = True
-
 class IncidentTraceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     incident_id: str
     trace_id: str
@@ -63,10 +63,9 @@ class IncidentTraceResponse(BaseModel):
     error_message: Optional[str] = None
     trace_metadata: Dict[str, Any] = {}
 
-    class Config:
-        from_attributes = True
-
 class IncidentResponse(IncidentBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     status: str
     start_time: str
@@ -79,9 +78,6 @@ class IncidentResponse(IncidentBase):
     logs_count: int = 0
     traces_count: int = 0
     patches_count: int = 0
-
-    class Config:
-        from_attributes = True
 
 class IncidentDetailResponse(IncidentResponse):
     events: List[IncidentEventResponse] = []

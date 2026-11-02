@@ -1,7 +1,9 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class BenchmarkIncidentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     benchmark_id: str
     title: str
@@ -11,9 +13,6 @@ class BenchmarkIncidentResponse(BaseModel):
     ground_truth_culprit_files: List[str] = []
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 class EvaluationRunRequest(BaseModel):
     name: str = "Benchmark Evaluation Run"
     model_name: str = "gpt-4o"
@@ -21,6 +20,8 @@ class EvaluationRunRequest(BaseModel):
     limit: Optional[int] = 10
 
 class EvaluationResultResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     benchmark_id: str
     incident_title: str
@@ -36,10 +37,9 @@ class EvaluationResultResponse(BaseModel):
     cost_usd: float
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 class EvaluationRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     model_name: str
@@ -57,9 +57,6 @@ class EvaluationRunResponse(BaseModel):
     average_cost_per_incident_usd: float
     created_at: str
     results: List[EvaluationResultResponse] = []
-
-    class Config:
-        from_attributes = True
 
 class DashboardMetricsResponse(BaseModel):
     total_incidents: int

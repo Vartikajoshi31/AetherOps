@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.user import User, Organization
@@ -48,7 +48,7 @@ async def seed_initial_data(session: AsyncSession):
         default_branch="main",
         clone_url="https://github.com/acme/ecommerce-platform.git",
         local_path="./demo-services",
-        indexed_at=datetime.utcnow().isoformat(),
+        indexed_at=datetime.now(timezone.utc).isoformat(),
         index_status="indexed",
         total_files=24,
         organization_id=org.id
@@ -111,7 +111,7 @@ async def seed_initial_data(session: AsyncSession):
         commit_sha="a7b4c81d",
         commit_message="perf: optimize database connection pooling for high concurrency",
         author="DevOps Team <devops@acme.corp>",
-        deployed_at=datetime.utcnow() - timedelta(hours=2),
+        deployed_at=datetime.now(timezone.utc) - timedelta(hours=2),
         status="succeeded",
         environment="production"
     )
@@ -122,7 +122,7 @@ async def seed_initial_data(session: AsyncSession):
         commit_sha="3f9e20a4",
         commit_message="feat: add exponential backoff for third-party payment gateway",
         author="Payment Team <payments@acme.corp>",
-        deployed_at=datetime.utcnow() - timedelta(days=1),
+        deployed_at=datetime.now(timezone.utc) - timedelta(days=1),
         status="succeeded",
         environment="production"
     )
@@ -140,7 +140,7 @@ async def seed_initial_data(session: AsyncSession):
         affected_services=["checkout-service", "payment-service"],
         error_rate="18.4%",
         detection_source="Datadog Alert: checkout-service 5xx Error Rate > 5%",
-        start_time=datetime.utcnow() - timedelta(minutes=25),
+        start_time=datetime.now(timezone.utc) - timedelta(minutes=25),
         organization_id=org.id,
         deployment_id=dep1.id,
         tags=["database", "concurrency", "checkout-service", "p0"]
@@ -157,7 +157,7 @@ async def seed_initial_data(session: AsyncSession):
         affected_services=["payment-service"],
         error_rate="7.2%",
         detection_source="Prometheus Alert: PaymentGatewayHighLatency",
-        start_time=datetime.utcnow() - timedelta(hours=3),
+        start_time=datetime.now(timezone.utc) - timedelta(hours=3),
         organization_id=org.id,
         deployment_id=dep2.id,
         tags=["network", "retry", "payment-service"]
@@ -174,8 +174,8 @@ async def seed_initial_data(session: AsyncSession):
         affected_services=["inventory-service"],
         error_rate="0.00%",
         detection_source="AWS CloudWatch: MemoryUtilizationHigh",
-        start_time=datetime.utcnow() - timedelta(days=2),
-        resolved_at=datetime.utcnow() - timedelta(days=1, hours=22),
+        start_time=datetime.now(timezone.utc) - timedelta(days=2),
+        resolved_at=datetime.now(timezone.utc) - timedelta(days=1, hours=22),
         root_cause_summary="Unbounded dictionary in inventory cache missing TTL expiry key evictions.",
         resolution_summary="Applied LRU eviction policy with maxsize=10000 and 300s TTL. Validated in sandbox with 0 regressions.",
         organization_id=org.id,
@@ -193,7 +193,7 @@ async def seed_initial_data(session: AsyncSession):
         affected_services=["order-service"],
         error_rate="4.1%",
         detection_source="Sentry Issue: TypeError: shipping_address is None",
-        start_time=datetime.utcnow() - timedelta(hours=8),
+        start_time=datetime.now(timezone.utc) - timedelta(hours=8),
         root_cause_summary="Missing defensive check for optional shipping address on digital goods orders in calculate_shipping_cost.",
         organization_id=org.id,
         tags=["npe", "order-service", "sentry"]
@@ -207,7 +207,7 @@ async def seed_initial_data(session: AsyncSession):
         incident_id=inc1.id,
         service_name="checkout-service",
         level="ERROR",
-        timestamp=datetime.utcnow() - timedelta(minutes=24),
+        timestamp=datetime.now(timezone.utc) - timedelta(minutes=24),
         message="sqlalchemy.exc.TimeoutError: QueuePool limit of size 10 overflow 10 reached, connection timed out, timeout 30.00",
         stack_trace="""File "/app/services/checkout/api.py", line 112, in create_checkout_session
     async with get_db_connection() as conn:
@@ -221,7 +221,7 @@ sqlalchemy.exc.TimeoutError: QueuePool limit of size 10 overflow 10 reached, con
         incident_id=inc1.id,
         service_name="checkout-service",
         level="ERROR",
-        timestamp=datetime.utcnow() - timedelta(minutes=23),
+        timestamp=datetime.now(timezone.utc) - timedelta(minutes=23),
         message="HTTP 500 Internal Server Error POST /api/v1/checkout/orders",
         stack_trace=None,
         log_attributes={"status_code": 500, "client_ip": "10.0.4.12", "latency_ms": 30045}
@@ -231,7 +231,7 @@ sqlalchemy.exc.TimeoutError: QueuePool limit of size 10 overflow 10 reached, con
         incident_id=inc1.id,
         service_name="payment-service",
         level="WARN",
-        timestamp=datetime.utcnow() - timedelta(minutes=22),
+        timestamp=datetime.now(timezone.utc) - timedelta(minutes=22),
         message="Upstream gateway response delayed: 1420ms for merchant_id=m_9941",
         stack_trace=None,
         log_attributes={"merchant_id": "m_9941", "duration_ms": 1420}

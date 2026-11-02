@@ -1,7 +1,9 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class PatchValidationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     patch_id: str
     status: str
@@ -18,10 +20,9 @@ class PatchValidationResponse(BaseModel):
     validation_summary: str
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 class PatchResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     incident_id: str
     run_id: Optional[str] = None
@@ -35,15 +36,14 @@ class PatchResponse(BaseModel):
     created_at: str
     validations: List[PatchValidationResponse] = []
 
-    class Config:
-        from_attributes = True
-
 class ApprovalRequest(BaseModel):
     action: str  # approved, rejected, modified
     feedback: Optional[str] = None
     create_github_pr: bool = False
 
 class ApprovalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     patch_id: str
     incident_id: str
@@ -53,6 +53,3 @@ class ApprovalResponse(BaseModel):
     created_pr: bool
     github_pr_url: Optional[str] = None
     created_at: str
-
-    class Config:
-        from_attributes = True

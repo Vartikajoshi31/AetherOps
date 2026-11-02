@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 class Token(BaseModel):
     access_token: str
@@ -21,12 +21,11 @@ class UserCreate(UserBase):
     password: str
 
 class UserResponse(UserBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     is_active: bool
     created_at: str
-
-    class Config:
-        from_attributes = True
 
 class LoginRequest(BaseModel):
     email: str
