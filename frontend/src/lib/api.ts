@@ -5,7 +5,10 @@ import {
   InvestigationReport,
   Patch,
   EvaluationRun,
-  BenchmarkIncident
+  BenchmarkIncident,
+  IncidentEvent,
+  IncidentLog,
+  IncidentTrace
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -39,12 +42,14 @@ export const api = {
   getMetrics: () => fetchJson<DashboardMetrics>("/api/metrics"),
 
   // Incidents
-  getIncidents: (params?: { status?: string; severity?: string; service?: string; search?: string }) => {
+  getIncidents: (params?: { status?: string; severity?: string; service?: string; search?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams();
     if (params?.status) query.append("status", params.status);
     if (params?.severity) query.append("severity", params.severity);
     if (params?.service) query.append("service", params.service);
     if (params?.search) query.append("search", params.search);
+    if (params?.limit) query.append("limit", params.limit.toString());
+    if (params?.offset) query.append("offset", params.offset.toString());
     const qs = query.toString() ? `?${query.toString()}` : "";
     return fetchJson<Incident[]>(`/api/incidents${qs}`);
   },
@@ -67,6 +72,25 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  updateIncident: (id: string, data: Partial<Incident>) =>
+    fetchJson<Incident>(`/api/incidents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  resolveIncident: (id: string, resolutionSummary: string) =>
+    fetchJson<Incident>(`/api/incidents/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolution_summary: resolutionSummary }),
+    }),
+
+  reopenIncident: (id: string) =>
+    fetchJson<Incident>(`/api/incidents/${id}/reopen`, {
+      method: "POST",
+    }),
+
+  getIncidentTimeline: (id: string) => fetchJson<IncidentEvent[]>(`/api/incidents/${id}/timeline`),
+
   getIncidentReport: (id: string) => fetchJson<InvestigationReport | null>(`/api/incidents/${id}/report`),
 
   getIncidentPatch: (id: string) => fetchJson<Patch | null>(`/api/incidents/${id}/patch`),
@@ -80,6 +104,30 @@ export const api = {
     fetchJson<any>(`/api/incidents/${incidentId}/approve`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  // Chaos Simulation & Demo Reset
+  getChaosScenarios: () => fetchJson<any[]>("/api/incidents/scenarios"),
+
+  simulateChaos: (scenarioKey: string) =>
+    fetchJson<Incident>("/api/incidents/simulate", {
+      method: "POST",
+      body: JSON.stringify({ scenario_key: scenarioKey }),
+    }),
+
+  resetDemo: () => fetchJson<any>("/api/incidents/reset-demo", { method: "POST" }),
+
+  // Telemetry Ingestion
+  ingestLog: (incidentId: string, logData: { service_name: string; level: string; message: string; stack_trace?: string; log_attributes?: any }) =>
+    fetchJson<IncidentLog>(`/api/incidents/${incidentId}/logs`, {
+      method: "POST",
+      body: JSON.stringify(logData),
+    }),
+
+  ingestTrace: (incidentId: string, traceData: { service_name: string; operation_name: string; duration_ms: number; status_code?: string; error_message?: string; trace_metadata?: any }) =>
+    fetchJson<IncidentTrace>(`/api/incidents/${incidentId}/traces`, {
+      method: "POST",
+      body: JSON.stringify(traceData),
     }),
 
   // Agent Investigation

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -23,12 +23,82 @@ from app.schemas.patch import (
     PatchValidationResponse
 )
 from app.schemas.agent import InvestigationReportResponse, InvestigationStartRequest
-from app.services.incident_service import IncidentService
+from app.services.incident_service import IncidentService, utcnow
+from app.services.simulation_service import SimulationService
 from app.api.ws import manager
+from pydantic import BaseModel
 import uuid
 from datetime import datetime
 
 incidents_router = APIRouter(prefix="/incidents", tags=["Incidents"])
+
+class LogIngestRequest(BaseModel):
+    service_name: str
+    level: str = "ERROR"
+    message: str
+    stack_trace: Optional[str] = None
+    log_attributes: Dict[str, Any] = {}
+
+class TraceIngestRequest(BaseModel):
+    service_name: str
+    operation_name: str
+    duration_ms: float
+    status_code: str = "500"
+    error_message: Optional[str] = None
+    trace_id: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
+    trace_metadata: Dict[str, Any] = {}
+
+class ResolveIncidentRequest(BaseModel):
+    resolution_summary: str
+
+class SimulationRequest(BaseModel):
+    scenario_key: str = "db_pool_exhaustion"
+
+@incidents_router.get("/scenarios")
+async def list_chaos_scenarios():
+    return SimulationService.get_available_scenarios()
+
+@incidents_router.post("/simulate", response_model=IncidentResponse)
+async def simulate_chaos_incident(
+    req: SimulationRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    incident = await SimulationService.simulate_incident(db, req.scenario_key)
+    await manager.broadcast_to_channel("global", {
+        "type": "incident_created",
+        "incident_id": incident.id,
+        "title": incident.title,
+        "severity": incident.severity
+    })
+    return IncidentResponse(
+        id=incident.id,
+        title=incident.title,
+        description=incident.description,
+        severity=incident.severity,
+        status=incident.status,
+        affected_services=incident.affected_services or [],
+        error_rate=incident.error_rate,
+        detection_source=incident.detection_source,
+        tags=incident.tags or [],
+        start_time=incident.start_time.isoformat() if incident.start_time else "",
+        resolved_at=None,
+        root_cause_summary=None,
+        resolution_summary=None,
+        created_at=incident.created_at.isoformat() if incident.created_at else "",
+        updated_at=incident.updated_at.isoformat() if incident.updated_at else "",
+        events_count=1,
+        logs_count=2,
+        traces_count=2,
+        patches_count=0
+    )
+
+@incidents_router.post("/reset-demo")
+async def reset_demo(db: AsyncSession = Depends(get_db)):
+    await SimulationService.reset_demo_state(db)
+    await manager.broadcast_to_channel("global", {"type": "demo_reset"})
+    return {"status": "success", "message": "Demo data reset to pristine baseline state"}
 
 @incidents_router.get("", response_model=List[IncidentResponse])
 async def list_incidents(
@@ -45,7 +115,6 @@ async def list_incidents(
     )
     results = []
     for inc in incidents:
-        # Count relations for list overview
         events_count = len(inc.events) if hasattr(inc, "events") and inc.events is not None else 0
         logs_count = len(inc.logs) if hasattr(inc, "logs") and inc.logs is not None else 0
         traces_count = len(inc.traces) if hasattr(inc, "traces") and inc.traces is not None else 0
@@ -81,8 +150,6 @@ async def create_incident(
     db: AsyncSession = Depends(get_db)
 ):
     incident = await IncidentService.create_incident(db, data)
-    
-    # Broadcast event via WebSocket
     await manager.broadcast_to_channel("global", {
         "type": "incident_created",
         "incident_id": incident.id,
@@ -191,6 +258,193 @@ async def get_incident(
                 trace_metadata=t.trace_metadata or {}
             ) for t in traces
         ]
+    )
+
+@incidents_router.post("/{incident_id}/logs", response_model=IncidentLogResponse)
+async def ingest_incident_log(
+    incident_id: str,
+    log_req: LogIngestRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    incident = await IncidentService.get_incident_by_id(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    log_entry = IncidentLog(
+        id=str(uuid.uuid4()),
+        incident_id=incident_id,
+        service_name=log_req.service_name,
+        level=log_req.level.upper(),
+        timestamp=utcnow(),
+        message=log_req.message,
+        stack_trace=log_req.stack_trace,
+        log_attributes=log_req.log_attributes
+    )
+    db.add(log_entry)
+    await db.commit()
+
+    await manager.broadcast_to_channel(incident_id, {
+        "type": "log_ingested",
+        "incident_id": incident_id,
+        "service": log_req.service_name,
+        "level": log_req.level
+    })
+
+    return IncidentLogResponse(
+        id=log_entry.id,
+        incident_id=log_entry.incident_id,
+        service_name=log_entry.service_name,
+        level=log_entry.level,
+        timestamp=log_entry.timestamp.isoformat(),
+        message=log_entry.message,
+        stack_trace=log_entry.stack_trace,
+        log_attributes=log_entry.log_attributes or {}
+    )
+
+@incidents_router.post("/{incident_id}/traces", response_model=IncidentTraceResponse)
+async def ingest_incident_trace(
+    incident_id: str,
+    trace_req: TraceIngestRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    incident = await IncidentService.get_incident_by_id(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    trace_entry = IncidentTrace(
+        id=str(uuid.uuid4()),
+        incident_id=incident_id,
+        trace_id=trace_req.trace_id or uuid.uuid4().hex,
+        span_id=trace_req.span_id or uuid.uuid4().hex[:16],
+        parent_span_id=trace_req.parent_span_id,
+        service_name=trace_req.service_name,
+        operation_name=trace_req.operation_name,
+        duration_ms=trace_req.duration_ms,
+        status_code=trace_req.status_code,
+        error_message=trace_req.error_message,
+        trace_metadata=trace_req.trace_metadata
+    )
+    db.add(trace_entry)
+    await db.commit()
+
+    await manager.broadcast_to_channel(incident_id, {
+        "type": "trace_ingested",
+        "incident_id": incident_id,
+        "operation": trace_req.operation_name
+    })
+
+    return IncidentTraceResponse(
+        id=trace_entry.id,
+        incident_id=trace_entry.incident_id,
+        trace_id=trace_entry.trace_id,
+        span_id=trace_entry.span_id,
+        parent_span_id=trace_entry.parent_span_id,
+        service_name=trace_entry.service_name,
+        operation_name=trace_entry.operation_name,
+        duration_ms=trace_entry.duration_ms,
+        status_code=trace_entry.status_code,
+        error_message=trace_entry.error_message,
+        trace_metadata=trace_entry.trace_metadata or {}
+    )
+
+@incidents_router.post("/{incident_id}/resolve", response_model=IncidentResponse)
+async def resolve_incident(
+    incident_id: str,
+    req: ResolveIncidentRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    incident = await IncidentService.get_incident_by_id(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    incident.status = "Resolved"
+    incident.resolved_at = utcnow()
+    incident.resolution_summary = req.resolution_summary
+
+    ev = IncidentEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="incident_resolved",
+        message=f"Incident marked Resolved by engineer. Resolution: {req.resolution_summary}",
+        actor="Human Engineer"
+    )
+    db.add(ev)
+    await db.commit()
+
+    await manager.broadcast_to_channel(incident_id, {
+        "type": "incident_resolved",
+        "incident_id": incident.id
+    })
+
+    return IncidentResponse(
+        id=incident.id,
+        title=incident.title,
+        description=incident.description,
+        severity=incident.severity,
+        status=incident.status,
+        affected_services=incident.affected_services or [],
+        error_rate=incident.error_rate,
+        detection_source=incident.detection_source,
+        tags=incident.tags or [],
+        start_time=incident.start_time.isoformat() if incident.start_time else "",
+        resolved_at=incident.resolved_at.isoformat() if incident.resolved_at else None,
+        root_cause_summary=incident.root_cause_summary,
+        resolution_summary=incident.resolution_summary,
+        created_at=incident.created_at.isoformat() if incident.created_at else "",
+        updated_at=incident.updated_at.isoformat() if incident.updated_at else "",
+        events_count=1,
+        logs_count=0,
+        traces_count=0,
+        patches_count=0
+    )
+
+@incidents_router.post("/{incident_id}/reopen", response_model=IncidentResponse)
+async def reopen_incident(
+    incident_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    incident = await IncidentService.get_incident_by_id(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    incident.status = "Investigating"
+    incident.resolved_at = None
+
+    ev = IncidentEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="incident_reopened",
+        message="Incident reopened for continuous investigation",
+        actor="Human Engineer"
+    )
+    db.add(ev)
+    await db.commit()
+
+    await manager.broadcast_to_channel(incident_id, {
+        "type": "incident_reopened",
+        "incident_id": incident.id
+    })
+
+    return IncidentResponse(
+        id=incident.id,
+        title=incident.title,
+        description=incident.description,
+        severity=incident.severity,
+        status=incident.status,
+        affected_services=incident.affected_services or [],
+        error_rate=incident.error_rate,
+        detection_source=incident.detection_source,
+        tags=incident.tags or [],
+        start_time=incident.start_time.isoformat() if incident.start_time else "",
+        resolved_at=None,
+        root_cause_summary=incident.root_cause_summary,
+        resolution_summary=incident.resolution_summary,
+        created_at=incident.created_at.isoformat() if incident.created_at else "",
+        updated_at=incident.updated_at.isoformat() if incident.updated_at else "",
+        events_count=1,
+        logs_count=0,
+        traces_count=0,
+        patches_count=0
     )
 
 @incidents_router.put("/{incident_id}", response_model=IncidentResponse)
@@ -353,7 +607,6 @@ async def approve_incident_patch(
     )
     db.add(approval)
 
-    # Add audit event
     event = IncidentEvent(
         id=str(uuid.uuid4()),
         incident_id=incident_id,
@@ -367,7 +620,7 @@ async def approve_incident_patch(
     incident = await IncidentService.get_incident_by_id(db, incident_id)
     if incident and approval_req.action == "approved":
         incident.status = "Resolved"
-        incident.resolved_at = datetime.utcnow()
+        incident.resolved_at = utcnow()
         incident.resolution_summary = f"Patch approved and applied. {f'Pull Request created: {pr_url}' if pr_url else ''}"
 
     await db.commit()
