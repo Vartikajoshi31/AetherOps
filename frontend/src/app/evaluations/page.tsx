@@ -402,7 +402,7 @@ export default function EvaluationsPage() {
                     </div>
 
                     <a
-                      href={`/api/evaluations/runs/${selectedRun.id}/csv`}
+                      href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/evaluations/runs/${selectedRun.id}/csv`}
                       download
                       className="py-2 px-3.5 rounded-lg border border-border bg-secondary/40 hover:bg-secondary text-foreground font-medium text-xs flex items-center gap-2 transition-colors"
                     >

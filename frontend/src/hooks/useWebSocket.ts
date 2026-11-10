@@ -13,6 +13,11 @@ export function useWebSocket({ channel = "global", onMessage, reconnectInterval 
   const [lastMessage, setLastMessage] = useState<any>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const onMessageRef = useRef(onMessage);
+
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
 
   const connect = useCallback(() => {
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/api/ws";
@@ -29,8 +34,8 @@ export function useWebSocket({ channel = "global", onMessage, reconnectInterval 
         try {
           const parsed = JSON.parse(event.data);
           setLastMessage(parsed);
-          if (onMessage) {
-            onMessage(parsed);
+          if (onMessageRef.current) {
+            onMessageRef.current(parsed);
           }
         } catch {
           // non-json
@@ -53,7 +58,7 @@ export function useWebSocket({ channel = "global", onMessage, reconnectInterval 
     } catch {
       setIsConnected(false);
     }
-  }, [channel, onMessage, reconnectInterval]);
+  }, [channel, reconnectInterval]);
 
   useEffect(() => {
     connect();

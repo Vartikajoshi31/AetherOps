@@ -15,7 +15,8 @@ import {
   ExternalLink,
   Cpu,
   Database,
-  Code2
+  Code2,
+  PlusCircle
 } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -158,6 +159,34 @@ export default function RepositoriesPage() {
   const [selectedFile, setSelectedFile] = useState<ServiceFile>(DEMO_SERVICES[0].files[0]);
   const [isIndexing, setIsIndexing] = useState(false);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newRepoName, setNewRepoName] = useState("");
+  const [newRepoFullName, setNewRepoFullName] = useState("");
+  const [newRepoBranch, setNewRepoBranch] = useState("main");
+  const [newRepoPath, setNewRepoPath] = useState("");
+  const [isAddingRepo, setIsAddingRepo] = useState(false);
+
+  const handleCreateRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRepoName.trim() || !newRepoFullName.trim()) return;
+    try {
+      setIsAddingRepo(true);
+      await api.createRepository({
+        name: newRepoName.trim(),
+        full_name: newRepoFullName.trim(),
+        default_branch: newRepoBranch.trim() || "main",
+        local_path: newRepoPath.trim() || undefined,
+      });
+      setShowAddModal(false);
+      setNewRepoName("");
+      setNewRepoFullName("");
+      await loadRepositories();
+    } catch (err: any) {
+      console.error("Failed to add repository:", err);
+    } finally {
+      setIsAddingRepo(false);
+    }
+  };
 
   useEffect(() => {
     loadRepositories();
@@ -206,16 +235,26 @@ export default function RepositoriesPage() {
           </p>
         </div>
 
-        {primaryRepo && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => handleTriggerIndex(primaryRepo.id)}
-            disabled={isIndexing}
-            className="py-2.5 px-4 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-medium text-xs flex items-center gap-2 transition-colors disabled:opacity-50"
+            onClick={() => setShowAddModal(true)}
+            className="py-2.5 px-4 rounded-lg border border-border bg-card hover:bg-secondary text-foreground font-medium text-xs flex items-center gap-2 transition-colors"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isIndexing ? "animate-spin" : ""}`} />
-            {isIndexing ? "Indexing Repository with Tree-sitter..." : "Trigger Full AST Re-Index"}
+            <PlusCircle className="h-3.5 w-3.5 text-primary" />
+            <span>Connect Repo</span>
           </button>
-        )}
+
+          {primaryRepo && (
+            <button
+              onClick={() => handleTriggerIndex(primaryRepo.id)}
+              disabled={isIndexing}
+              className="py-2.5 px-4 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-medium text-xs flex items-center gap-2 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isIndexing ? "animate-spin" : ""}`} />
+              {isIndexing ? "Indexing Repository with Tree-sitter..." : "Trigger Full AST Re-Index"}
+            </button>
+          )}
+        </div>
       </div>
 
       {indexMessage && (
@@ -426,6 +465,89 @@ export default function RepositoriesPage() {
           </div>
         </div>
       </div>
+
+      {/* Connect Repository Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <FolderGit2 className="h-4 w-4 text-primary" />
+                <span>Connect Code Repository</span>
+              </h3>
+              <button onClick={() => setShowAddModal(false)} className="text-muted-foreground hover:text-foreground">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateRepo} className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Repository Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newRepoName}
+                  onChange={(e) => setNewRepoName(e.target.value)}
+                  placeholder="e.g. billing-service"
+                  className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Full Path / Identifier</label>
+                <input
+                  type="text"
+                  required
+                  value={newRepoFullName}
+                  onChange={(e) => setNewRepoFullName(e.target.value)}
+                  placeholder="e.g. acme/billing-service"
+                  className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Branch</label>
+                  <input
+                    type="text"
+                    value={newRepoBranch}
+                    onChange={(e) => setNewRepoBranch(e.target.value)}
+                    placeholder="main"
+                    className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Local Path</label>
+                  <input
+                    type="text"
+                    value={newRepoPath}
+                    onChange={(e) => setNewRepoPath(e.target.value)}
+                    placeholder="./demo-services"
+                    className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-border/60">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAddingRepo}
+                  className="px-4 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold disabled:opacity-50"
+                >
+                  {isAddingRepo ? "Connecting..." : "Register Repository"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

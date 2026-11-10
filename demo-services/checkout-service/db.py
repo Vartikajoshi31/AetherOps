@@ -16,6 +16,9 @@ class MockConnection:
     async def close(self):
         self.is_closed = True
 
+    def reset_state(self):
+        self.is_closed = False
+
 class DatabaseConnectionPool:
     def __init__(self, max_size: int = 10, timeout: float = 2.0):
         self.max_size = max_size

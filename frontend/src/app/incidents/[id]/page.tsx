@@ -34,6 +34,7 @@ import {
   ChevronUp,
   ExternalLink,
   ShieldAlert,
+  Trash2,
 } from "lucide-react";
 
 type TabType = "overview" | "logs" | "traces" | "evidence" | "patch" | "timeline";
@@ -152,6 +153,16 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
     }
   };
 
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to permanently delete incident ${incidentId}?`)) return;
+    try {
+      await api.deleteIncident(incidentId);
+      window.location.href = "/incidents";
+    } catch (err) {
+      console.error("Delete failed:", err);
+    }
+  };
+
   if (isLoading && !incident) {
     return (
       <div className="h-96 flex items-center justify-center text-xs text-muted-foreground gap-2">
@@ -222,6 +233,15 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
                 <span>Mark Resolved</span>
               </button>
             )}
+
+            <button
+              onClick={handleDelete}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-900/40 bg-red-950/20 hover:bg-red-950/50 text-xs font-semibold text-red-400 transition-colors"
+              title="Delete Incident"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Delete</span>
+            </button>
 
             <button
               onClick={handleStartInvestigation}

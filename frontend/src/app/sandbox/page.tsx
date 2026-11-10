@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ShieldCheck,
   Terminal,
@@ -15,6 +15,7 @@ import {
   Lock,
   FileCheck
 } from "lucide-react";
+import { api } from "@/lib/api";
 
 const DEMO_TESTS = [
   {
@@ -43,39 +44,34 @@ export default function SandboxPage() {
   const [patchDiff, setPatchDiff] = useState(DEMO_TESTS[0].patch);
   const [isRunning, setIsRunning] = useState(false);
   const [output, setOutput] = useState<any>(null);
+  const [sandboxStatus, setSandboxStatus] = useState<any>(null);
+
+  useEffect(() => {
+    api.getSandboxStatus()
+      .then(setSandboxStatus)
+      .catch((err) => console.warn("Sandbox status offline:", err));
+  }, []);
 
   const handleRunSandbox = async () => {
     setIsRunning(true);
     setOutput(null);
 
-    // Call backend endpoint or simulate live sandbox
     try {
-      const res = await fetch("/api/rag/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: selectedCase.service, limit: 1 })
+      const res = await api.validateSandboxPatch({
+        service_name: selectedCase.service,
+        affected_file: selectedCase.file,
+        diff_patch: patchDiff,
+        regression_test_code: testCode,
       });
-      // Simulate real sandbox execution metrics
-      await new Promise((r) => setTimeout(r, 1200));
-      setOutput({
-        success: true,
-        syntax_valid: true,
-        exit_code: 0,
-        duration_seconds: 0.84,
-        tests_run: 2,
-        tests_passed: 2,
-        tests_failed: 0,
-        stdout: `============================= test session starts =============================\nplatform win32 -- Python 3.13.14, pytest-8.3.0\nrootdir: C:\\temp\\agentops_sandbox_x89a1\\${selectedCase.service}\ncollected 2 items\n\ntests/test_regression_patch.py::test_sanity PASSED                      [ 50%]\ntests/test_regression_patch.py::test_verified_behavior PASSED          [100%]\n\n============================== 2 passed in 0.42s ==============================`,
-        stderr: ""
-      });
+      setOutput(res);
     } catch (e: any) {
       setOutput({
         success: false,
         syntax_valid: false,
         exit_code: 1,
-        duration_seconds: 0.2,
+        duration_seconds: 0.1,
         stdout: "",
-        stderr: e.message
+        stderr: e.message || "Failed to execute in sandbox",
       });
     } finally {
       setIsRunning(false);

@@ -27,23 +27,23 @@ from app.services.incident_service import IncidentService, utcnow
 from app.services.simulation_service import SimulationService
 from app.services.investigation_service import InvestigationService
 from app.api.ws import manager
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uuid
 from datetime import datetime
 
 incidents_router = APIRouter(prefix="/incidents", tags=["Incidents"])
 
 class LogIngestRequest(BaseModel):
-    service_name: str
-    level: str = "ERROR"
-    message: str
+    service_name: str = Field(..., min_length=1, max_length=128)
+    level: str = Field("ERROR", min_length=1, max_length=32)
+    message: str = Field(..., min_length=1)
     stack_trace: Optional[str] = None
     log_attributes: Dict[str, Any] = {}
 
 class TraceIngestRequest(BaseModel):
-    service_name: str
-    operation_name: str
-    duration_ms: float
+    service_name: str = Field(..., min_length=1, max_length=128)
+    operation_name: str = Field(..., min_length=1, max_length=256)
+    duration_ms: float = Field(..., ge=0.0)
     status_code: str = "500"
     error_message: Optional[str] = None
     trace_id: Optional[str] = None
@@ -52,7 +52,7 @@ class TraceIngestRequest(BaseModel):
     trace_metadata: Dict[str, Any] = {}
 
 class ResolveIncidentRequest(BaseModel):
-    resolution_summary: str
+    resolution_summary: str = Field(..., min_length=1, max_length=2000)
 
 class SimulationRequest(BaseModel):
     scenario_key: str = "db_pool_exhaustion"
@@ -486,6 +486,20 @@ async def update_incident(
         patches_count=0
     )
 
+@incidents_router.delete("/{incident_id}", status_code=status.HTTP_200_OK)
+async def delete_incident(
+    incident_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    success = await IncidentService.delete_incident(db, incident_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    await manager.broadcast_to_channel("global", {
+        "type": "incident_deleted",
+        "incident_id": incident_id
+    })
+    return {"status": "success", "message": f"Incident {incident_id} deleted successfully"}
+
 @incidents_router.get("/{incident_id}/timeline", response_model=List[IncidentEventResponse])
 async def get_incident_timeline(incident_id: str, db: AsyncSession = Depends(get_db)):
     events_stmt = select(IncidentEvent).filter(IncidentEvent.incident_id == incident_id).order_by(IncidentEvent.created_at)
@@ -585,6 +599,12 @@ async def approve_incident_patch(
     approval_req: ApprovalRequest,
     db: AsyncSession = Depends(get_db)
 ):
+    if approval_req.action not in ["approved", "rejected", "modified"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid action '{approval_req.action}'. Action must be 'approved', 'rejected', or 'modified'."
+        )
+
     patch_stmt = select(Patch).filter(Patch.incident_id == incident_id).order_by(desc(Patch.created_at))
     patch = (await db.execute(patch_stmt)).scalars().first()
     if not patch:

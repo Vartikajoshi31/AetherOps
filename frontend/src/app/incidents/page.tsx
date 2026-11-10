@@ -97,6 +97,7 @@ export default function IncidentsPage() {
         msg.type === "incident_updated" ||
         msg.type === "incident_resolved" ||
         msg.type === "incident_reopened" ||
+        msg.type === "incident_deleted" ||
         msg.type === "demo_reset"
       ) {
         loadIncidents();

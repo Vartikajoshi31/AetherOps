@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, and_
+from sqlalchemy import select, func, desc, and_, cast, String
 from sqlalchemy.orm import selectinload
 from app.models.incident import Incident, IncidentEvent, IncidentLog, IncidentTrace, Deployment
 from app.models.repository import Service, Repository
@@ -39,6 +39,8 @@ class IncidentService:
             query = query.filter(Incident.status == status)
         if severity and severity != "all":
             query = query.filter(Incident.severity == severity)
+        if service and service != "all":
+            query = query.filter(cast(Incident.affected_services, String).ilike(f"%{service}%"))
         if search:
             query = query.filter(
                 (Incident.title.ilike(f"%{search}%")) |
@@ -49,9 +51,6 @@ class IncidentService:
         query = query.limit(limit).offset(offset)
         result = await session.execute(query)
         incidents = result.scalars().all()
-
-        if service and service != "all":
-            return [inc for inc in incidents if service in (inc.affected_services or [])]
         return list(incidents)
 
     @staticmethod
@@ -129,6 +128,15 @@ class IncidentService:
 
         await session.commit()
         return await IncidentService.get_incident_by_id(session, incident_id)
+
+    @staticmethod
+    async def delete_incident(session: AsyncSession, incident_id: str) -> bool:
+        incident = await IncidentService.get_incident_by_id(session, incident_id)
+        if not incident:
+            return False
+        await session.delete(incident)
+        await session.commit()
+        return True
 
     @staticmethod
     async def get_dashboard_metrics(session: AsyncSession) -> Dict[str, Any]:

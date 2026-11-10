@@ -148,6 +148,11 @@ async def run_evaluation_benchmark(
 @evaluations_router.get("/runs/{run_id}/csv")
 async def export_evaluation_run_csv(run_id: str, db: AsyncSession = Depends(get_db)):
     """Exports an evaluation run's detailed results as a downloadable CSV."""
+    run_stmt = select(EvaluationRun).filter(EvaluationRun.id == run_id)
+    run = (await db.execute(run_stmt)).scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Evaluation run '{run_id}' not found")
+
     csv_data = await BenchmarkService.export_run_to_csv(db, run_id=run_id)
     return Response(
         content=csv_data,

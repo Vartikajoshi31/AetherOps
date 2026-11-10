@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Settings,
   Key,
@@ -39,8 +39,47 @@ export default function SettingsPage() {
 
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("agentops_settings");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.apiKey) setApiKey(parsed.apiKey);
+        if (parsed.selectedModel) setSelectedModel(parsed.selectedModel);
+        if (parsed.temperature !== undefined) setTemperature(parsed.temperature);
+        if (parsed.maxRetries !== undefined) setMaxRetries(parsed.maxRetries);
+        if (parsed.tokenBudget !== undefined) setTokenBudget(parsed.tokenBudget);
+        if (parsed.sandboxTimeout !== undefined) setSandboxTimeout(parsed.sandboxTimeout);
+        if (parsed.sandboxMemory !== undefined) setSandboxMemory(parsed.sandboxMemory);
+        if (parsed.enableDocker !== undefined) setEnableDocker(parsed.enableDocker);
+        if (parsed.githubToken) setGithubToken(parsed.githubToken);
+        if (parsed.githubOrg) setGithubOrg(parsed.githubOrg);
+        if (parsed.autoCreatePR !== undefined) setAutoCreatePR(parsed.autoCreatePR);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      localStorage.setItem("agentops_settings", JSON.stringify({
+        apiKey,
+        selectedModel,
+        temperature,
+        maxRetries,
+        tokenBudget,
+        sandboxTimeout,
+        sandboxMemory,
+        enableDocker,
+        githubToken,
+        githubOrg,
+        autoCreatePR
+      }));
+    } catch {
+      // ignore
+    }
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };

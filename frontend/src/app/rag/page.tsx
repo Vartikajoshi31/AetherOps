@@ -102,7 +102,7 @@ export default function RAGPage() {
     setIsSearching(true);
     setSearchError(null);
     try {
-      const res = await api.searchRAG(query, limit);
+      const res = await api.searchRAG(query, limit, fileHint.trim() || undefined, funcHint.trim() || undefined);
       setResults(res);
     } catch (e: any) {
       setSearchError(e.message || "Failed to search knowledge base");

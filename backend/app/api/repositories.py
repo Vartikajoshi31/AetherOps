@@ -1,5 +1,6 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from app.database.session import get_db
@@ -48,6 +49,43 @@ async def list_repositories(db: AsyncSession = Depends(get_db)):
             created_at=r.created_at.isoformat() if r.created_at else ""
         ) for r in repos
     ]
+
+@repositories_router.post("", response_model=RepositoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_repository(
+    data: RepositoryCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(Repository).filter(Repository.full_name == data.full_name)
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Repository {data.full_name} is already registered")
+
+    repo = Repository(
+        id=str(uuid.uuid4()),
+        name=data.name,
+        full_name=data.full_name,
+        default_branch=data.default_branch or "main",
+        clone_url=data.clone_url,
+        local_path=data.local_path,
+        index_status="pending",
+        total_files=0
+    )
+    db.add(repo)
+    await db.commit()
+    await db.refresh(repo)
+
+    return RepositoryResponse(
+        id=repo.id,
+        name=repo.name,
+        full_name=repo.full_name,
+        default_branch=repo.default_branch,
+        clone_url=repo.clone_url,
+        local_path=repo.local_path,
+        indexed_at=repo.indexed_at,
+        index_status=repo.index_status,
+        total_files=repo.total_files,
+        created_at=repo.created_at.isoformat() if repo.created_at else ""
+    )
 
 @repositories_router.post("/{repo_id}/index")
 async def trigger_repository_index(repo_id: str, db: AsyncSession = Depends(get_db)):

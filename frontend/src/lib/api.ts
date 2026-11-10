@@ -89,6 +89,11 @@ export const api = {
       method: "POST",
     }),
 
+  deleteIncident: (id: string) =>
+    fetchJson<{ status: string; message: string }>(`/api/incidents/${id}`, {
+      method: "DELETE",
+    }),
+
   getIncidentTimeline: (id: string) => fetchJson<IncidentEvent[]>(`/api/incidents/${id}/timeline`),
 
   getIncidentReport: (id: string) => fetchJson<InvestigationReport | null>(`/api/incidents/${id}/report`),
@@ -152,10 +157,15 @@ export const api = {
     }),
 
   // RAG & Telemetry
-  searchRAG: (query: string, limit: number = 5) =>
+  searchRAG: (query: string, limit: number = 5, fileHint?: string, funcHint?: string) =>
     fetchJson<any[]>("/api/rag/search", {
       method: "POST",
-      body: JSON.stringify({ query, limit }),
+      body: JSON.stringify({
+        query,
+        limit,
+        target_file_hint: fileHint || undefined,
+        target_func_hint: funcHint || undefined,
+      }),
     }),
 
   getRAGStats: () => fetchJson<{ collection_name: string; vector_dimension: number; total_points_indexed: number; status: string }>("/api/rag/stats"),
@@ -166,8 +176,36 @@ export const api = {
       body: JSON.stringify({ test_cases: testCases }),
     }),
 
+  // Sandbox Runner
+  validateSandboxPatch: (data: {
+    service_name: string;
+    affected_file: string;
+    diff_patch: string;
+    regression_test_code?: string;
+    timeout_seconds?: number;
+  }) =>
+    fetchJson<any>("/api/sandbox/validate", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getSandboxStatus: () => fetchJson<any>("/api/sandbox/status"),
+
+  getSandboxExamples: () => fetchJson<any[]>("/api/sandbox/examples"),
+
   // Repositories
   getRepositories: () => fetchJson<any[]>("/api/repositories"),
+  createRepository: (data: {
+    name: string;
+    full_name: string;
+    default_branch?: string;
+    clone_url?: string;
+    local_path?: string;
+  }) =>
+    fetchJson<any>("/api/repositories", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   indexRepository: (repoId: string) =>
     fetchJson<any>(`/api/repositories/${repoId}/index`, { method: "POST" }),
 };
